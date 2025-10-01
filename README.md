@@ -29,7 +29,8 @@ Determining the minimum number of most frequently used operators required to gen
 Using itertools.product to generate all possible combinations of these selected operators within a user-defined length range (e.g., 1 to 3 operators).
 This results in a dense, new rule set optimized for coverage based on observed operator usage.
 
-```usage: concentrator_v1.1.0.py [-h] [-t TOP_RULES] [-o OUTPUT_FILE] [-m MAX_LENGTH] [-s] [-g] [-n COMBO_TARGET] [-l COMBO_LENGTH [COMBO_LENGTH ...]]
+```
+usage: concentrator_v1.1.0.py [-h] [-t TOP_RULES] [-o OUTPUT_FILE] [-m MAX_LENGTH] [-s] [-g] [-n COMBO_TARGET] [-l COMBO_LENGTH [COMBO_LENGTH ...]]
                               [-gc COMBO_OUTPUT_FILE] [--temp-dir TEMP_DIR] [--in-memory]
                               filepaths [filepaths ...]
 
@@ -56,6 +57,4 @@ options:
   --temp-dir TEMP_DIR   Optional: Specify a directory for temporary files created during parallel processing (e.g., a fast SSD path). Ignored if --in-memory
                         is used.
   --in-memory           Process all rules entirely in RAM, skipping temporary file creation and disk I/O for rule collection.
-
-
 ```
