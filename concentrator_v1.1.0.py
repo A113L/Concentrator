@@ -391,7 +391,7 @@ def save_rules_to_file(rules_data, filename, mode):
         header = (
             "# Rules generated combinatorially from top used operators. Rules are SYNTACTICALLY VALID (argument count checked).\n"
             "# WARNING: Generated rules often contain semantically useless sequences (e.g., redundant operations) "
-            "and MUST be post-processed with external tools (like Hashcat's 'rulefilter' or 'RuleCleaner') for optimal performance.\n"
+            "and MUST be post-processed with external tools (like Hashcat's cleanup-rules.bin) for optimal performance.\n"
         )
     else:
         rules_to_save = sorted(list(rules_data))
