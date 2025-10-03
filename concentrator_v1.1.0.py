@@ -1,36 +1,49 @@
 # Concentrator v1.1.0
-# Description: Unified Hashcat Rule Processor with Combinatorial Generation.
-# Extracts rules based on either raw frequency or Markov sequence probability.
+# Description: Unified Hashcat Rule Processor with Validated Combinatorial Generation.
+# Extracts rules based on frequency or Markov probability and generates new, syntax-checked rules.
+# NOTE: Rules generated in statistical and combinatorial modes may still benefit from post-processing 
+# with external tools like Hashcat's cleanup-rules.bin for final optimization 
 
 import sys
 import re
 import argparse
 from collections import defaultdict
 import math
-import itertools 
+import itertools
 import multiprocessing
-import os 
-import tempfile 
+import os
+import tempfile
 
-# --- Settings Required for Analysis ---
+# --- Hashcat Rule Syntax Definitions ---
+# Defines the set of ALL characters that can be part of a valid rule string.
 ALL_RULE_CHARS = set("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:,.lu.#()=%!?|~+*-^$sStTiIoOcCrRyYzZeEfFxXdDpPbBqQ`[]><@&vV")
+
+# Defines operators and the EXACT number of arguments (non-operators) they require.
 OPERATORS_REQUIRING_ARGS = {
-        's': 2, 'S': 2, 't': 2, 'T': 2, 'i': 2, 'I': 2, 'o': 2, 'O': 2, 'c': 2, 'C': 2, 'r': 2, 'R': 2, 'y': 2, 'Y': 2, 'z': 2, 'Z': 2, 'e': 2, 'E': 2,
-        'f': 1, 'F': 1, 'x': 1, 'X': 1, 'd': 1, 'D': 1, 'p': 1, 'P': 1, 'b': 1, 'B': 1, 'q': 1, 'Q': 1, '`': 1, '[': 1, ']': 1, '>': 1, '<': 1, '@': 1, '&': 1,
-        'v': 3, 'V': 3,}
+    's': 2, 'S': 2, 't': 2, 'T': 2, 'i': 2, 'I': 2, 'o': 2, 'O': 2, 'c': 2, 'C': 2, 'r': 2, 'R': 2, 'y': 2, 'Y': 2, 'z': 2, 'Z': 2, 'e': 2, 'E': 2,
+    'f': 1, 'F': 1, 'x': 1, 'X': 1, 'd': 1, 'D': 1, 'p': 1, 'P': 1, 'b': 1, 'B': 1, 'q': 1, 'Q': 1, '`': 1, '[': 1, ']': 1, '>': 1, '<': 1, '@': 1, '&': 1,
+    'v': 3, 'V': 3,
+}
+# Simple operators require 0 arguments.
 SIMPLE_OPERATORS = [
-        ':', ',', 'l', 'u', '.', '#', '(', ')', '=', '%', '!', '?', '|', '~', '+', '*', '-', '^', '$']
+    ':', ',', 'l', 'u', '.', '#', '(', ')', '=', '%', '!', '?', '|', '~', '+', '*', '-', '^', '$']
+
+# Build the complete list of all possible operator strings for accurate regex parsing
 ALL_OPERATORS = list(OPERATORS_REQUIRING_ARGS.keys()) + SIMPLE_OPERATORS
 for i in range(10):
-        ALL_OPERATORS.append(f'${i}')
-        ALL_OPERATORS.append(f'^{i}')
-# Compile Regex Pattern ONCE
+    # Special operators like $0, $1, ^0, ^1
+    ALL_OPERATORS.append(f'${i}')
+    ALL_OPERATORS.append(f'^{i}')
+
+# Compile Regex Pattern ONCE for fast operator counting
 REGEX_OPERATORS = [re.escape(op) for op in ALL_OPERATORS]
 COMPILED_REGEX = re.compile('|'.join(filter(None, REGEX_OPERATORS)))
 
 # Global variables to store CLI settings (required for multiprocessing workers)
 _TEMP_DIR_PATH = None
 _IN_MEMORY_MODE = False
+_OP_REQS = OPERATORS_REQUIRING_ARGS
+_VALID_CHARS = ALL_RULE_CHARS
 
 def set_global_flags(temp_dir_path, in_memory_mode):
     """Sets the global flags required by worker processes."""
@@ -48,20 +61,54 @@ def set_global_flags(temp_dir_path, in_memory_mode):
                 print(f"Warning: Could not create temporary directory at {temp_dir_path}. Falling back to default system temp directory. Error: {e}", flush=True)
                 _TEMP_DIR_PATH = None
     elif in_memory_mode:
-         print("In-Memory Mode activated. Temporary files will be skipped.")
+          print("In-Memory Mode activated. Temporary files will be skipped.")
+
+# --- Hashcat Syntax Validation Function (Crucial Enhancement) ---
+def is_valid_hashcat_rule(rule: str, op_reqs: dict, valid_chars: set) -> bool:
+    """
+    Checks if a generated rule string has valid Hashcat syntax, specifically 
+    ensuring operators have the correct number of arguments.
+    """
+    i = 0
+    while i < len(rule):
+        op = rule[i]
+        
+        # 1. Handle special operators: $X and ^X (which are 2 characters but count as 1 op)
+        if op in ('$', '^') and i + 1 < len(rule) and rule[i+1].isdigit():
+            i += 2 
+            continue
+        
+        # 2. Handle simple operators (0 arguments)
+        if op not in op_reqs:
+            if op not in valid_chars: # Non-operator characters that aren't args should fail
+                 return False
+            i += 1
+            continue
+            
+        # 3. Handle operators requiring arguments (s, S, i, I, v, V, etc.)
+        required_args = op_reqs.get(op, 0)
+        
+        # Check if the remaining length is sufficient for arguments
+        if i + 1 + required_args > len(rule):
+            return False
+            
+        # Check if all arguments are part of the allowed rule character set
+        args_segment = rule[i+1 : i + 1 + required_args]
+        if not all(arg in valid_chars for arg in args_segment):
+            return False
+            
+        i += 1 + required_args # Move pointer past the operator and its arguments
+        
+    return True
 
 # --- Core Worker Function for File Analysis (Runs in a separate process) ---
 def process_single_file(filepath, max_rule_length):
-    """
-    Processes a single rule file. Depending on the global flag _IN_MEMORY_MODE,
-    it either writes rules to a temporary file or returns them directly in memory.
-    """
+    """Processes a single rule file and counts frequencies."""
     operator_counts = defaultdict(int)
     full_rule_counts = defaultdict(int)
     clean_rules_list = []
     temp_rule_filepath = None
     
-    # Check the global flag (inherited from the main process)
     global _IN_MEMORY_MODE, _TEMP_DIR_PATH
 
     try:
@@ -70,16 +117,16 @@ def process_single_file(filepath, max_rule_length):
                 line = line.strip()
                 if not line or line.startswith('#') or len(line) > max_rule_length:
                     continue
-                                                
+                    
                 clean_line = ''.join(c for c in line if c in ALL_RULE_CHARS)
                 if not clean_line: continue
-                                                
+                    
                 # 1. Frequency Count
                 full_rule_counts[clean_line] += 1
-                                
-                # 2. Store rule (always collect in memory first)
+                    
+                # 2. Store rule
                 clean_rules_list.append(clean_line)
-                                                
+                    
                 # 3. Operator Count
                 for match in COMPILED_REGEX.finditer(clean_line):
                     op = match.group(0)
@@ -94,14 +141,12 @@ def process_single_file(filepath, max_rule_length):
             temp_rule_filepath = temp_rule_file.name
             for rule in clean_rules_list:
                 temp_rule_file.write(rule + '\n')
-            temp_rule_file.close() 
+            temp_rule_file.close()  
             print(f"File analysis complete: {filepath}. Temp rules saved to {temp_rule_filepath}", flush=True)
-            # In file mode, return the path and an empty list for total_all_clean_rules
             return operator_counts, full_rule_counts, [], temp_rule_filepath
         else:
             # --- IN-MEMORY MODE: Return the list of rules directly ---
             print(f"File analysis complete: {filepath}. Rules returned in memory.", flush=True)
-            # In memory mode, return the list of rules and None for temp_filepath
             return operator_counts, full_rule_counts, clean_rules_list, None
             
     except Exception as e:
@@ -111,54 +156,42 @@ def process_single_file(filepath, max_rule_length):
         return defaultdict(int), defaultdict(int), [], None
 
 def analyze_rule_files_parallel(filepaths, max_rule_length):
-    """
-    Parallel file analysis using multiprocessing.Pool. Handles both file-based 
-    and in-memory aggregation of rules based on the global flag.
-    """
+    """Parallel file analysis using multiprocessing.Pool."""
     total_operator_counts = defaultdict(int)
     total_full_rule_counts = defaultdict(int) 
     
     temp_files_to_merge = []
-    total_all_clean_rules = [] # List to hold all rules (either merged from files or directly from workers)
+    total_all_clean_rules = []
     
-    global _IN_MEMORY_MODE # Get the mode from global setting
+    global _IN_MEMORY_MODE
     
     num_processes = min(os.cpu_count() or 1, len(filepaths))
     tasks = [(filepath, max_rule_length) for filepath in filepaths]
     
     print(f"Starting parallel analysis of {len(filepaths)} files using {num_processes} processes...")
     with multiprocessing.Pool(processes=num_processes) as pool:
-        # Results contain: (op_counts, rule_counts_worker, clean_rules_list, temp_filepath)
         results = pool.starmap(process_single_file, tasks)
         
-    # Aggregate results from all processes in the main thread
     for op_counts, rule_counts_worker, clean_rules_worker, temp_filepath in results:
-        # 1. Aggregate Operator Counts
         for op, count in op_counts.items():
             total_operator_counts[op] += count
             
-        # 2. Aggregate Rule Counts (Unique rules)
         for rule, count in rule_counts_worker.items():
             total_full_rule_counts[rule] += count
             
-        # 3. Store rules/paths based on mode
         if _IN_MEMORY_MODE:
-            # In-Memory Mode: Rules are already in the list returned by the worker
             total_all_clean_rules.extend(clean_rules_worker)
         else:
-            # File Mode: Store temporary file path for later merging
             if temp_filepath:
                 temp_files_to_merge.append(temp_filepath)
             
-    # 4. Final Rule Aggregation (if in File Mode)
     if not _IN_MEMORY_MODE:
         print("\nMerging temporary rule files into memory for Markov processing...")
         for temp_filepath in temp_files_to_merge:
             try:
                 with open(temp_filepath, 'r', encoding='utf-8') as f:
-                    # Appending the list of rules from the temp file
                     total_all_clean_rules.extend([line.strip() for line in f])
-                os.unlink(temp_filepath) # Delete file after use
+                os.unlink(temp_filepath)
             except Exception as e:
                 print(f"Error merging temp file {temp_filepath}: {e}")
             
@@ -169,13 +202,10 @@ def analyze_rule_files_parallel(filepaths, max_rule_length):
 
 # --- Markov and Extraction Functions ---
 def get_markov_weighted_rules(unique_rules):
-    """
-    Builds the Markov model and calculates the log-probability weight for each unique rule.
-    Used for the Statistical Sort mode.
-    """
+    """Builds the Markov model and calculates the log-probability weight for each unique rule."""
     print("\n--- Calculating Statistical Weight (Markov Sequence Probability) ---")
     markov_model_counts = defaultdict(lambda: defaultdict(int))
-    START_CHAR = '^'         
+    START_CHAR = '^'            
     weighted_rules = []
     
     # 1. Build the Markov Model (Trigrams and Bigrams)
@@ -209,7 +239,7 @@ def get_markov_weighted_rules(unique_rules):
                 current_prefix = rule[i] # Bigram prefix
             next_char = rule[i+1]
             
-            if next_char in markov_model_counts[current_prefix]:
+            if current_prefix in markov_model_counts and next_char in markov_model_counts[current_prefix]:
                 probability = markov_model_counts[current_prefix][next_char] / total_transitions[current_prefix]
                 log_probability_sum += math.log(probability)
             else:
@@ -222,11 +252,9 @@ def get_markov_weighted_rules(unique_rules):
     sorted_weighted_rules = sorted(weighted_rules, key=lambda item: item[1], reverse=True)
     return sorted_weighted_rules
 
-# --- Combinatorial Generation Functions (Parallelized) ---
+# --- Combinatorial Generation Functions (Parallelized and VALIDATED) ---
 def find_min_operators_for_target(sorted_operators, target_rules, min_len, max_len):
-    """
-    Finds the minimum number of top operators needed to generate the target number of rules.
-    """
+    """Finds the minimum number of top operators needed to generate the target number of rules."""
     current_rule_count = 0
     num_operators = 0
     while current_rule_count < target_rules and num_operators < len(sorted_operators):
@@ -238,48 +266,61 @@ def find_min_operators_for_target(sorted_operators, target_rules, min_len, max_l
             
     return [op for op, count in sorted_operators[:num_operators]]
 
-def generate_rules_for_length(args):
-    """Worker function to generate rules for a single length (L)."""
-    top_operators, length = args
+def generate_rules_for_length_validated(args):
+    """Worker function to generate rules for a single length (L) with syntax validation."""
+    top_operators, length, op_reqs, valid_chars = args
     generated_rules = set()
+    
     for combo in itertools.product(top_operators, repeat=length):
         new_rule = ''.join(combo)
-        generated_rules.add(new_rule)
+        
+        # VALIDATION STEP: Check if the rule is syntactically correct for Hashcat
+        if is_valid_hashcat_rule(new_rule, op_reqs, valid_chars):
+            generated_rules.add(new_rule)
+            
     return generated_rules
 
 def generate_rules_parallel(top_operators, min_len, max_len):
     """
-    Generates all rules in parallel based on a list of operators and a length range.
+    Generates all VALID rules in parallel based on a list of operators and a length range.
     """
     all_lengths = list(range(min_len, max_len + 1))
-    tasks = [(top_operators, length) for length in all_lengths]
+    
+    # Pass the global constants needed for validation to the worker processes
+    tasks = [(top_operators, length, _OP_REQS, _VALID_CHARS) for length in all_lengths]
     
     num_processes = min(os.cpu_count() or 1, len(all_lengths))
-    print(f"Generating new rules of length {min_len} to {max_len} using {len(top_operators)} operators across {num_processes} processes...")
+    print(f"Generating new VALID rules of length {min_len} to {max_len} using {len(top_operators)} operators across {num_processes} processes...")
     
     with multiprocessing.Pool(processes=num_processes) as pool:
-        results = pool.map(generate_rules_for_length, tasks)
+        results = pool.map(generate_rules_for_length_validated, tasks)
         
     # Aggregate results from all processes (sets are merged)
     generated_rules = set().union(*results)
+    
+    print(f"Generated and validated {len(generated_rules)} syntactically correct rules.")
     return generated_rules
 
 # --- Utility Functions (Modified for combinatorial warning) ---
 def save_rules_to_file(rules_data, filename, mode):
-    """
-    Saves the rules to a file. Handles both extracted data (list of tuples) 
-    and generated data (set of strings).
-    """
+    """Saves the rules to a file."""
     if mode == 'frequency':
         rules_to_save = [r[0] for r in rules_data]
         header = "# Rules extracted and sorted by RAW FREQUENCY (most occurrences).\n"
     elif mode == 'statistical':
         rules_to_save = [r[0] for r in rules_data]
-        header = "# Rules extracted and sorted by STATISTICAL WEIGHT (Markov Log-Probability).\n"
+        header = (
+            "# Rules extracted and sorted by STATISTICAL WEIGHT (Markov Log-Probability).\n"
+            "# NOTE: Rules in this mode may benefit from post-processing with external tools "
+            "like Hashcat's 'rulefilter' or 'RuleCleaner' to remove semantically useless sequences.\n"
+        )
     elif mode == 'combo':
-        rules_to_save = sorted(list(rules_data)) # Ensure it is a sorted list of strings
-        # Warning about potentially invalid rules:
-        header = "# Rules generated combinatorially from top used operators. WARNING: This set may contain a large number of syntactically INVALID rules (e.g., missing arguments) that Hashcat will skip.\n"
+        rules_to_save = sorted(list(rules_data))
+        header = (
+            "# Rules generated combinatorially from top used operators. Rules are SYNTACTICALLY VALID (argument count checked).\n"
+            "# WARNING: Generated rules often contain semantically useless sequences (e.g., redundant operations) "
+            "and MUST be post-processed with external tools (like Hashcat's 'rulefilter' or 'RuleCleaner') for optimal performance.\n"
+        )
     else:
         rules_to_save = sorted(list(rules_data))
         header = f"# Rules saved: {len(rules_to_save)} total.\n"
@@ -289,7 +330,7 @@ def save_rules_to_file(rules_data, filename, mode):
         f.write(header)
         for rule in rules_to_save:
             f.write(f"{rule}\n")
-                    
+            
     print("Done.")
     sys.stdout.flush()
 
@@ -298,16 +339,16 @@ if __name__ == '__main__':
     # Fix for multiprocessing on Windows
     multiprocessing.freeze_support() 
     
-    parser = argparse.ArgumentParser(description='Extracts top N rules sorted by raw frequency (default) or Markov sequence probability (-s), or generates combinatorial rules (-g). NOW WITH MULTIPROCESSING AND COMPATIBILITY FIX.')
+    parser = argparse.ArgumentParser(description='Extracts top N rules sorted by raw frequency (default) or Markov sequence probability (-s), or generates VALID combinatorial rules (-g). NOW WITH MULTIPROCESSING AND SYNTAX CHECKING.')
     parser.add_argument('filepaths', nargs='+', help='Paths to the rule files to analyze.')
     parser.add_argument('-t', '--top_rules', type=int, default=10000, help='The number of top existing rules to extract and save (for Frequency/Statistical modes).')
     parser.add_argument('-o', '--output_file', type=str, default='optimized_top_rules.txt', help='The name of the output file for extracted rules.')
     parser.add_argument('-m', '--max_length', type=int, default=31, help='The maximum length (in characters/bytes) for rules to be extracted. Default is 31.')
     parser.add_argument('-s', '--statistical_sort', action='store_true', help='Sorts rules by Markov sequence probability (statistical strength) instead of raw frequency.')
     parser.add_argument('-g', '--generate_combo', action='store_true', help='Enables generating a separate file with combinatorial rules from top operators.')
-    parser.add_argument('-n', '--combo_target', type=int, default=100000, help='The approximate number of rules to generate in combinatorial mode.')
+    parser.add_argument('-n', '--combo_target', type=int, default=100000, help='The approximate number of rules to generate in combinatorial mode (used to determine the number of operators to use).')
     parser.add_argument('-l', '--combo_length', nargs='+', type=int, default=[1, 3], help='The range of rule chain lengths for combinatorial mode (e.g., 1 3).')
-    parser.add_argument('-gc', '--combo_output_file', type=str, default='generated_combos.txt', help='The name of the output file for generated rules.')
+    parser.add_argument('-gc', '--combo_output_file', type=str, default='generated_combos_validated.txt', help='The name of the output file for generated rules.')
     
     # --- New CLI Flags ---
     parser.add_argument('--temp-dir', type=str, default=None, 
@@ -329,7 +370,7 @@ if __name__ == '__main__':
         max_len = args.combo_length[-1]
 
     # --- 1. Parallel Rule File Analysis (Compatible Mode) ---
-    print("--- 1. Starting Parallel Rule File Analysis (Compatible Mode) ---")
+    print("--- 1. Starting Parallel Rule File Analysis ---")
     
     sorted_op_counts, full_rule_counts, all_clean_rules = analyze_rule_files_parallel(args.filepaths, args.max_length) 
     
@@ -368,10 +409,10 @@ if __name__ == '__main__':
     # --- 4. Save the extracted results ---
     save_rules_to_file(top_rules_data, args.output_file, mode)
 
-    # --- 5. Parallel Combinatorial Generation Logic ---
+    # --- 5. Parallel Combinatorial Generation Logic (with Validation) ---
     if args.generate_combo:
         print("\n" + "="*50)
-        print("--- 3. Starting PARALLEL Combinatorial Rule Generation ---")
+        print("--- 3. Starting PARALLEL Combinatorial Rule Generation (Validated) ---")
         print("="*50)
         
         min_operators_needed = find_min_operators_for_target(
@@ -380,7 +421,7 @@ if __name__ == '__main__':
             min_len, 
             max_len
         )
-                
+        
         print(f"Using {len(min_operators_needed)} most frequent operators to target ~{args.combo_target} rules (Length {min_len}-{max_len}).")
         
         generated_rules_set = generate_rules_parallel(min_operators_needed, min_len, max_len)
