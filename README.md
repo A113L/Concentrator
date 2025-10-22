@@ -23,7 +23,7 @@ It extracts and saves the top N unique rules based solely on their raw occurrenc
 B. *Statistical Sort (-s)*
 It prioritizes rules by calculating a Markov Log-Probability Weight. A bigram/trigram Markov model is built from the observed operator sequences. Rules exhibiting statistically stronger, high-frequency operator transitions are ranked and extracted.
 
-C. *Added the flag -gm/--generate_markov_rules* for statistical rule generation fro filepaths (1.4.0)
+C. *Added the flag -gm/--generate_markov_rules* for statistical rule generation (1.4.0)
 Allows generating new, statistically probable rule chains based on the model built from input files.
 
 D. *Combinatorial Generation (-g)*
