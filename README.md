@@ -34,10 +34,10 @@ Using itertools.product to generate all possible combinations of these selected 
 This results in a dense, new rule set optimized for coverage based on observed operator usage.
 
 ```
-usage: concentrator_1.4.0.py [-h] [-t TOP_RULES] [-o OUTPUT_FILE] [-m MAX_LENGTH] [-s] [-g] [-gc COMBO_OUTPUT_FILE] [-n COMBO_TARGET]
-                             [-l COMBO_LENGTH [COMBO_LENGTH ...]] [-gm] [-go MARKOV_OUTPUT_FILE] [--temp-dir TEMP_DIR] [--in-memory] [-cb CLEANUP_BIN]
-                             [-ca CLEANUP_ARG]
-                             paths [paths ...]
+usage: concentrator_v1.4.1.py [-h] [-t TOP_RULES] [-o OUTPUT_FILE] [-m MAX_LENGTH] [-s] [-g] [-gc COMBO_OUTPUT_FILE] [-n COMBO_TARGET]
+                              [-l COMBO_LENGTH [COMBO_LENGTH ...]] [-gm] [-go MARKOV_OUTPUT_FILE] [-ml MARKOV_LENGTH [MARKOV_LENGTH ...]]
+                              [--temp-dir TEMP_DIR] [--in-memory] [-cb CLEANUP_BIN] [-ca CLEANUP_ARG]
+                              paths [paths ...]
 
 Extracts top N rules sorted by raw frequency, statistical probability, or generates VALID combinatorial/Markov rules, with optional post-processing cleanup.
 Supports recursive folder search.
@@ -66,10 +66,13 @@ options:
                         Enables generating statistically probable rules by traversing the Markov model.
   -go MARKOV_OUTPUT_FILE, --markov_output_file MARKOV_OUTPUT_FILE
                         The name of the output file for generated Markov rules.
+  -ml MARKOV_LENGTH [MARKOV_LENGTH ...], --markov_length MARKOV_LENGTH [MARKOV_LENGTH ...]
+                        The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to --combo_length if not set.
   --temp-dir TEMP_DIR   Optional: Specify a directory for temporary files.
   --in-memory           Process all rules entirely in RAM.
   -cb CLEANUP_BIN, --cleanup-bin CLEANUP_BIN
                         Optional: Path to the external cleanup binary (e.g., ./cleanup-rules.bin). If provided, it will run after rule generation.
   -ca CLEANUP_ARG, --cleanup-arg CLEANUP_ARG
                         Argument to pass to the cleanup binary (e.g., "2" for hashcat's cleanup-rules.bin).
+
 ```
