@@ -35,8 +35,8 @@ This results in a dense, new rule set optimized for coverage based on observed o
 
 ```
 usage: concentrator_v1.4.1.py [-h] [-t TOP_RULES] [-o OUTPUT_FILE] [-m MAX_LENGTH] [-s] [-g] [-gc COMBO_OUTPUT_FILE] [-n COMBO_TARGET]
-                              [-l COMBO_LENGTH [COMBO_LENGTH ...]] [-gm] [-go MARKOV_OUTPUT_FILE] [-ml MARKOV_LENGTH [MARKOV_LENGTH ...]]
-                              [--temp-dir TEMP_DIR] [--in-memory] [-cb CLEANUP_BIN] [-ca CLEANUP_ARG]
+                              [-l COMBO_LENGTH [COMBO_LENGTH ...]] [-gm] [-ml MARKOV_LENGTH [MARKOV_LENGTH ...]] [--temp-dir TEMP_DIR] [--in-memory]
+                              [-cb CLEANUP_BIN] [-ca CLEANUP_ARG]
                               paths [paths ...]
 
 Extracts top N rules sorted by raw frequency, statistical probability, or generates VALID combinatorial/Markov rules, with optional post-processing cleanup.
@@ -50,7 +50,7 @@ options:
   -t TOP_RULES, --top_rules TOP_RULES
                         The number of top existing rules to extract and save.
   -o OUTPUT_FILE, --output_file OUTPUT_FILE
-                        The name of the output file for extracted rules.
+                        The name of the output file for extracted rules (also used as base for Markov output).
   -m MAX_LENGTH, --max_length MAX_LENGTH
                         The maximum length for rules to be extracted. Default is 31.
   -s, --statistical_sort
@@ -64,8 +64,6 @@ options:
                         The range of rule chain lengths for combinatorial mode (e.g., 1 3).
   -gm, --generate_markov_rules
                         Enables generating statistically probable rules by traversing the Markov model.
-  -go MARKOV_OUTPUT_FILE, --markov_output_file MARKOV_OUTPUT_FILE
-                        The name of the output file for generated Markov rules.
   -ml MARKOV_LENGTH [MARKOV_LENGTH ...], --markov_length MARKOV_LENGTH [MARKOV_LENGTH ...]
                         The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to --combo_length if not set.
   --temp-dir TEMP_DIR   Optional: Specify a directory for temporary files.
@@ -75,4 +73,3 @@ options:
   -ca CLEANUP_ARG, --cleanup-arg CLEANUP_ARG
                         Argument to pass to the cleanup binary (e.g., "2" for hashcat's cleanup-rules.bin).
 
-```
