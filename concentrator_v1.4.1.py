@@ -1,4 +1,4 @@
-# Concentrator v1.4.0 (Enhanced with Markov Generation)
+# Concentrator v1.4.1
 # Description: Unified Hashcat Rule Processor with Validated Combinatorial Generation
 # and new Statistical (Markov) Rule Generation. Supports recursive file search.
 
@@ -73,7 +73,7 @@ def is_valid_hashcat_rule(rule: str, op_reqs: dict, valid_chars: set) -> bool:
         
         if op not in op_reqs:
             if op not in valid_chars:
-                 return False
+                return False
             i += 1
             continue
             
@@ -161,7 +161,6 @@ def process_single_file(filepath, max_rule_length):
 
 def analyze_rule_files_parallel(filepaths, max_rule_length):
     """Parallel file analysis using multiprocessing.Pool."""
-    # ... (function body remains the same as previous version, using process_single_file)
     total_operator_counts = defaultdict(int)
     total_full_rule_counts = defaultdict(int) 
     
@@ -216,7 +215,7 @@ def get_markov_model(unique_rules):
     """Builds the Markov model (counts) and transition probabilities."""
     print("\n--- Building Markov Sequence Probability Model ---")
     markov_model_counts = defaultdict(lambda: defaultdict(int))
-    START_CHAR = '^'               
+    START_CHAR = '^'            
     
     # 1. Build the Markov Model (Bigrams and Trigrams)
     for rule in unique_rules.keys():
@@ -298,11 +297,7 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
     generated_rules = set()
     START_CHAR = '^'
     
-    # Use a priority queue or simple loop to ensure we explore paths from high to low probability
-    # For simplicity, we'll use a breadth-first approach, prioritizing the most likely next steps.
-    
     # Store operators with their probabilities for weighted random choice (simpler approach)
-    # The keys in the model are prefixes (bigram and trigram prefixes)
     
     def get_next_operator(current_prefix):
         """Returns the next operator based on probability distribution (weighted random choice)."""
@@ -317,9 +312,6 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
         
         # Weighted random choice (simulating the probability)
         return random.choices(choices, weights=weights, k=1)[0]
-    
-    # Optimization: Pre-sort starting operators by probability
-    starting_ops = sorted(markov_probabilities[START_CHAR].items(), key=lambda item: item[1], reverse=True)
     
     # Attempt to generate a certain number of valid rules
     generation_attempts = target_rules * 5 # Try more times than the target
@@ -364,16 +356,13 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
         # Create a dummy frequency count for the generated rules
         generated_rule_counts = {rule: 1 for rule in generated_rules}
         
-        # Recalculate the model using ONLY the *generated* rules (optional, but cleaner)
-        # OR use the pre-built model (simpler and faster)
+        # Use the pre-built model for weighting
         weighted_output = get_markov_weighted_rules(generated_rule_counts, markov_probabilities, {}) # total_transitions is not strictly needed here
         return weighted_output
     
     return []
 
 # --- Utility Functions (Cleanup and Save) ---
-# ... (run_and_rename_cleanup remains the same)
-
 def save_rules_to_file(rules_data, filename, mode):
     """Saves the rules to a file."""
     
@@ -383,25 +372,25 @@ def save_rules_to_file(rules_data, filename, mode):
         if mode == 'frequency':
             header = "# Rules extracted and sorted by RAW FREQUENCY (most occurrences).\n"
         else: # mode is 'statistical' or statistically sorted 'combo' / 'markov'
-             header = (
-                f"# Rules extracted/generated and sorted by STATISTICAL WEIGHT (Markov Log-Probability). Mode: {mode.upper()}\n"
-                "# NOTE: Rules in this mode may benefit from post-processing with external tools like Hashcat's 'rulefilter' or 'RuleCleaner' to remove semantically useless sequences.\n"
-            )
+              header = (
+                  f"# Rules extracted/generated and sorted by STATISTICAL WEIGHT (Markov Log-Probability). Mode: {mode.upper()}\n"
+                  "# NOTE: Rules in this mode may benefit from post-processing with external tools like Hashcat's 'rulefilter' or 'RuleCleaner' to remove semantically useless sequences.\n"
+              )
 
     # Check if data is a set/list of rule strings (Combinatorial mode or just a list of rules)
     elif mode in ('combo', 'markov_generated'):
         rules_to_save = sorted(list(rules_data))
         if mode == 'combo':
             header = (
-                "# Rules generated combinatorially from top used operators. Rules are SYNTACTICALLY VALID (argument count checked).\n"
+                "# Rules generated combinatorially from top operators. Rules are SYNTACTICALLY VALID (argument count checked).\n"
                 "# WARNING: Generated rules often contain semantically useless sequences (e.g., redundant operations) "
                 "and MUST be post-processed with external tools (like Hashcat's cleanup-rules.bin) for optimal performance.\n"
             )
         else:
-             header = (
-                "# Rules generated via Markov Model Traversal (statistically probable chains).\n"
-                "# These are generally more effective than pure combinatorial rules. SYNTACTICALLY VALID (argument count checked).\n"
-            )
+              header = (
+                  "# Rules generated via Markov Model Traversal (statistically probable chains).\n"
+                  "# These are generally more effective than pure combinatorial rules. SYNTACTICALLY VALID (argument count checked).\n"
+              )
     else:
         rules_to_save = sorted(list(rules_data))
         header = f"# Rules saved: {len(rules_to_save)} total.\n"
@@ -415,9 +404,7 @@ def save_rules_to_file(rules_data, filename, mode):
     print(f"File '{filename}' saved.")
     sys.stdout.flush()
 
-# ... (run_and_rename_cleanup - place here if using the full script)
 def run_and_rename_cleanup(input_file, command_binary, command_arg):
-    # ... (body from previous version)
     RULE_TO_ADD = ":\n"
     temp_output_file = "temp_cleanup.rule"
     
@@ -558,6 +545,9 @@ if __name__ == '__main__':
     # Statistical (Markov) Generation Flag (NEW)
     parser.add_argument('-gm', '--generate_markov_rules', action='store_true', help='Enables generating statistically probable rules by traversing the Markov model.')
     parser.add_argument('-go', '--markov_output_file', type=str, default='generated_markov_rules.txt', help='The name of the output file for generated Markov rules.')
+    
+    # NEW ARGUMENT FOR MARKOV LENGTH
+    parser.add_argument('-ml', '--markov_length', nargs='+', type=int, default=None, help='The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to --combo_length if not set.')
 
     # Global/Utility Flags
     parser.add_argument('--temp-dir', type=str, default=None, help='Optional: Specify a directory for temporary files.')
@@ -598,13 +588,43 @@ if __name__ == '__main__':
     print(f"Found {len(all_filepaths)} rule files to analyze.")
     
     set_global_flags(args.temp_dir, args.in_memory)
-        
-    if args.generate_combo or args.generate_markov_rules:
-        if len(args.combo_length) not in [1, 2] or (len(args.combo_length) == 2 and args.combo_length[0] > args.combo_length[1]):
-            print("Error: Invalid chain length range for generation modes. Use 'L' or 'L_min L_max'.")
+    
+    
+    # --- LENGTH VALIDATION FOR GENERATION MODES ---
+    combo_min_len, combo_max_len = None, None
+    markov_min_len, markov_max_len = None, None
+
+    # Combinatorial Length Setup
+    if args.generate_combo:
+        length_source = args.combo_length
+        if len(length_source) not in [1, 2]:
+            print("Error: Invalid chain length range for combinatorial mode (--combo_length). Use 'L' or 'L_min L_max'.")
             sys.exit(1)
-        min_len = args.combo_length[0]
-        max_len = args.combo_length[-1]
+        combo_min_len = length_source[0]
+        combo_max_len = length_source[-1]
+        if combo_min_len > combo_max_len:
+            print("Error: Invalid chain length range for combinatorial mode. L_min cannot be greater than L_max.")
+            sys.exit(1)
+
+    # Markov Length Setup (uses -ml, falls back to -l if -ml is not set)
+    if args.generate_markov_rules:
+        length_source = args.markov_length if args.markov_length is not None else args.combo_length
+        
+        # We need a valid length source, which should be guaranteed if generate_markov_rules is set.
+        if len(length_source) not in [1, 2]:
+            print("Error: Invalid chain length range for Markov mode (derived from --markov_length or --combo_length). Use 'L' or 'L_min L_max'.")
+            sys.exit(1)
+            
+        markov_min_len = length_source[0]
+        markov_max_len = length_source[-1]
+        
+        if markov_min_len > markov_max_len:
+            print("Error: Invalid chain length range for Markov mode. L_min cannot be greater than L_max.")
+            sys.exit(1)
+        
+        source_flag = "(--markov_length)" if args.markov_length is not None else "(--combo_length fallback)"
+        print(f"Markov Generation Length Range set to: {markov_min_len}-{markov_max_len} {source_flag}")
+
 
     # --- 1. Parallel Rule File Analysis ---
     print("--- 1. Starting Parallel Rule File Analysis ---")
@@ -653,12 +673,12 @@ if __name__ == '__main__':
         print("--- 3. Starting STATISTICAL Markov Rule Generation (Validated) ---")
         print("!"*50)
         
-        # We use the Markov model to generate chains, prioritizing statistically probable transitions.
+        # Use the determined Markov lengths
         markov_rules_data = generate_rules_from_markov_model(
             markov_probabilities, 
-            args.combo_target, # Re-using combo_target for the number of rules to generate
-            min_len, 
-            max_len
+            args.combo_target, 
+            markov_min_len, 
+            markov_max_len
         )
         
         markov_output_file_name = args.markov_output_file
@@ -678,27 +698,26 @@ if __name__ == '__main__':
         print("--- 4. Starting PARALLEL Combinatorial Rule Generation (Validated) ---")
         print("="*50)
         
+        # Use the determined Combinatorial lengths
         min_operators_needed = find_min_operators_for_target(
             sorted_op_counts, 
             args.combo_target, 
-            min_len, 
-            max_len
+            combo_min_len, 
+            combo_max_len
         )
         
-        print(f"Using {len(min_operators_needed)} most frequent operators to target ~{args.combo_target} rules (Length {min_len}-{max_len}).")
+        print(f"Using {len(min_operators_needed)} most frequent operators to target ~{args.combo_target} rules (Length {combo_min_len}-{combo_max_len}).")
         
-        generated_rules_set = generate_rules_parallel(min_operators_needed, min_len, max_len)
+        generated_rules_set = generate_rules_parallel(min_operators_needed, combo_min_len, combo_max_len)
         
         combo_output_file_name = args.combo_output_file
         
-        # Combinatorial generation is not statistically sorted unless requested (removed old flag, sticking to the Markov generation for statistics)
         save_rules_to_file(generated_rules_set, combo_output_file_name, 'combo')
         
         if args.cleanup_bin:
             print("\n" + "~"*50)
-            print("--- Running Cleanup on Combinatorial Generated Rules ---")
+            print("--- Running Cleanup on Combinatorially Generated Rules ---")
             print("~"*50)
             run_and_rename_cleanup(combo_output_file_name, args.cleanup_bin, args.cleanup_arg)
             
-    print("\nComplete! The script has finished. Check the output file(s).")
-    sys.stdout.flush()
+    print("\nProcessing complete. Check output files for results.")
