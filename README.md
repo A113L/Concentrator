@@ -1,7 +1,7 @@
 # Concentrator
 **Unified Hashcat Rule Processor**
 
-[![concentrator.png](https://i.postimg.cc/ZnCmSFnq/concentrator.png)](https://postimg.cc/SYF3L9W0)
+[![concentrator.jpg](https://i.postimg.cc/jdfV4j7D/concentrator.jpg)](https://postimg.cc/JGRd1MK8)
 
 The script is a Unified Hashcat Rule Processor designed for advanced analysis and optimization of password cracking rule sets. It operates in two distinct, sequential phases: Analysis and Extraction/Generation.
 
