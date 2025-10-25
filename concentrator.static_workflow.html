@@ -8,7 +8,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <!-- UPDATED FONT LINK to include Space Mono with Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -34,6 +35,8 @@
             border-radius: 0.5rem;
             padding: 0.75rem 1.25rem;
             text-align: center;
+            /* Use Space Mono for technical flow cards */
+            font-family: 'Space Mono', monospace; 
             font-weight: 700;
             color: #F3F4F6;
             border: 1px solid #4B5563;
@@ -50,6 +53,10 @@
             font-size: 2.5rem;
             font-weight: 900;
             margin: 0.5rem 0;
+        }
+        .data-point {
+             /* Use Space Mono for large numerical data points */
+            font-family: 'Space Mono', monospace;
         }
     </style>
 </head>
@@ -103,11 +110,13 @@
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
                 <div class="flex flex-col justify-center items-center space-y-8 p-4">
                     <div class="text-center">
-                        <div class="text-6xl font-black" style="color: #00FF7F;">1,845,209</div>
+                        <!-- Applied data-point class for Space Mono -->
+                        <div class="text-6xl font-black data-point" style="color: #00FF7F;">1,845,209</div>
                         <div class="text-xl text-gray-300 mt-2">Total Unique Rules Analyzed</div>
                     </div>
                     <div class="text-center">
-                        <div class="text-6xl font-black" style="color: #00FF7F;">5,230,112</div>
+                        <!-- Applied data-point class for Space Mono -->
+                        <div class="text-6xl font-black data-point" style="color: #00FF7F;">5,230,112</div>
                         <div class="text-xl text-gray-300 mt-2">Markov Transitions Modeled</div>
                     </div>
                 </div>
@@ -156,7 +165,7 @@
                 <div class="bg-gray-700 p-6 rounded-lg shadow-lg">
                     <span class="text-5xl" role="img" aria-label="shuffle">🔀</span>
                     <h3 class="text-2xl font-bold text-white mt-4 mb-2">Combinatorial Generation</h3>
-                    <p class="text-gray-300">Generates all possible combinations from the Top K most frequent operators. This is a fast but "dumb" method that creates a high volume of rules.</p>
+                    <p class="text-gray-300">Generates all possible combinations from the Top K most frequent operators. This is a fast and effective method that creates a high volume of rules that guess simple passwords in seconds.</p>
                 </div>
                 <div class="bg-gray-700 p-6 rounded-lg shadow-lg">
                     <span class="text-5xl" role="img" aria-label="dna">🧬</span>
