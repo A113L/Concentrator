@@ -1,74 +1,81 @@
-# Concentrator
-**Unified Hashcat Rule Processor**
+🛡️ **Concentrator: Unified Hashcat Rule Processor (v1.4.1)**
 
-The script is a Unified Hashcat Rule Processor designed for advanced analysis and optimization of password cracking rule sets. It operates in two distinct, sequential phases: Analysis and Extraction/Generation.
+Concentrator is a powerful, parallelized Python script designed to analyze existing Hashcat rule sets and generate new, highly optimized rules. It supports three core modes: Frequency Extraction, Statistical (Markov) Extraction, and Validated Combinatorial/Markov Rule Generation.
+
+It is built with speed and accuracy in mind, featuring multiprocessing, robust Hashcat syntax validation, and optional external cleanup integration (e.g., for cleanup-rules.bin).
+
+✨ **Features**
+
+1. Recursive File Search: Analyzes rule files in specified directories and subdirectories.
+
+2. Parallel Processing: Uses multiprocessing to speed up rule file analysis.
+
+3. Hashcat Syntax Validation: Ensures all generated rules (Combinatorial and Markov) are syntactically correct (i.e., operators have the right number of arguments).
+
+**Extraction Modes:**
+
+1. Frequency: Extracts the most frequently occurring unique rules.
+
+2. Statistical (Markov): Extracts existing rules sorted by their statistical probability (Markov Log-Probability), prioritizing common, effective rule chains.
+
+**Generation Modes:**
+
+1. Combinatorial Generation: Generates new rules from the most frequent operators, up to a target count, with full syntax validation.
+
+2. Statistical (Markov) Generation: Generates new rules by traversing a statistical Markov model built from the input rules, creating statistically probable and syntactically valid chains.
+
+3. External Cleanup Integration: Supports running an external rule cleanup tool (like Hashcat's cleanup-rules.bin) on the generated output files for post-processing.
+
+🚀 **Usage**
+
+Prerequisites
+You need Python 3.x. No external non-standard libraries are strictly required.
+
+- Clone the repository (or just download the script)
+
+```git clone https://github.com/A113L/Concentrator.git```
+
+```cd Concentrator```
+
+**Basic Analysis & Frequency Extraction**
+Analyze rule files in the current directory and its subfolders, then extract the top 50,000 rules sorted by raw frequency:
 
 
-**Analysis Phase (Prerequisite)**
+```python3 concentrator_v1.4.1.py . -o top_50k_freq.rule -t 50000```
 
-The script first performs a comprehensive analysis of the input rule files, filtering rules by maximum length (default: 31 characters) and removing comments. This phase generates two primary data sets:
+**Statistical Extraction**
+Extract the top 10,000 existing rules, but sort them by their Markov sequence probability (statistical weight):
 
-*Full Rule Counts:* A frequency map of every unique rule.
+```python3 concentrator_v1.4.1.py ./path/to/rules/ -s -t 10000 -o top_10k_stat.rule```
 
-*Operator Counts:* A count of every individual Hashcat operator (e.g., l, c, sX, ^1) found.
+**Validated Markov Rule Generation**
+Generate 200,000 new, statistically probable rules of length 1 to 5, and save them to a derived file name.
+
+```python3 concentrator_v1.4.1.py ./path/to/rules/ --generate_markov_rules -n 200000 -ml 1 5 -o base_rules.rule```
+- Output will be saved to: base_rules_markov.rule
+
+**Validated Combinatorial Generation with Cleanup**
+Generate up to 1 million syntactically valid combinatorial rules of length 1 to 3, and then pipe the output through an external cleanup utility.
 
 
-**Extraction & Generation Phases (Modes)**
+```python3 concentrator_v1.4.1.py . --generate_combo -n 1000000 -l 1 3 -cb /usr/local/bin/cleanup-rules.bin -ca 2 -gc generated_combos.rule```
+- The final cleaned file will be renamed like: generated_combos_CLEANED_2_[COUNT].rule
 
-The script supports three modes for outputting optimized rules:
+**Concentrator command line arguments**
 
-A. *Frequency Sort (Default)*
-It extracts and saves the top N unique rules based solely on their raw occurrence count in the input files.
+```paths	(Positionals)	Required. Paths to rule files or directories to analyze (recursive search is enabled).
+-t	--top_rules	eg. 10000	- number of top rules to extract (Frequency or Statistical mode).
+-m	--max_length	eg. 31	- maximum length for rules to be extracted.
+-o	--output_file	eg. optimized_top_rules.txt	- output file for extracted rules.
+-s	--statistical_sort	- false	Sorts extracted rules by Markov probability instead of raw frequency.
+-g	--generate_combo - enables combinatorial rule generation.
+-gc	--combo_output_file eg.	generated_combos_validated.txt	- output file for combinatorial rules.
+-n	--combo_target	eg. 100000	- the approximate number of rules to generate in combination/Markov mode.
+-l	--combo_length - length range for combinatorial generation (e.g., 1 3).
+-gm	--generate_markov_rules	-	enables statistical (Markov) rule generation.
+-ml	--markov_length	-	length range for Markov generation. Defaults to --combo_length if not set.
+--in-memory	-	process all rules entirely in RAM (useful for small datasets, risky for large ones).
+-cb	--cleanup-bin	-	path to an external cleanup utility (e.g., cleanup-rules.bin).
+-ca	--cleanup-arg	2	argument to pass to the external cleanup binary.```
 
-B. *Statistical Sort (-s)*
-It prioritizes rules by calculating a Markov Log-Probability Weight. A bigram/trigram Markov model is built from the observed operator sequences. Rules exhibiting statistically stronger, high-frequency operator transitions are ranked and extracted.
-
-C. *Added the flag -gm/--generate_markov_rules* for statistical rule generation (1.4.0)
-Allows generating new, statistically probable rule chains based on the model built from input files.
-
-D. *Combinatorial Generation (-g)*
-This optional mode generates a separate, comprehensive rule file by:
-Determining the minimum number of most frequently used operators required to generate approximately N rules.
-Using itertools.product to generate all possible combinations of these selected operators within a user-defined length range (e.g., 1 to 3 operators).
-This results in a dense, new rule set optimized for coverage based on observed operator usage.
-
-```
-usage: concentrator_v1.4.1.py [-h] [-t TOP_RULES] [-o OUTPUT_FILE] [-m MAX_LENGTH] [-s] [-g] [-gc COMBO_OUTPUT_FILE] [-n COMBO_TARGET]
-                              [-l COMBO_LENGTH [COMBO_LENGTH ...]] [-gm] [-ml MARKOV_LENGTH [MARKOV_LENGTH ...]] [--temp-dir TEMP_DIR] [--in-memory]
-                              [-cb CLEANUP_BIN] [-ca CLEANUP_ARG]
-                              paths [paths ...]
-
-Extracts top N rules sorted by raw frequency, statistical probability, or generates VALID combinatorial/Markov rules, with optional post-processing cleanup.
-Supports recursive folder search.
-
-positional arguments:
-  paths                 Paths to rule files or directories to analyze. If a directory is provided, it will be searched recursively.
-
-options:
-  -h, --help            show this help message and exit
-  -t TOP_RULES, --top_rules TOP_RULES
-                        The number of top existing rules to extract and save.
-  -o OUTPUT_FILE, --output_file OUTPUT_FILE
-                        The name of the output file for extracted rules (also used as base for Markov output).
-  -m MAX_LENGTH, --max_length MAX_LENGTH
-                        The maximum length for rules to be extracted. Default is 31.
-  -s, --statistical_sort
-                        Sorts EXTRACTED rules by Markov sequence probability instead of raw frequency.
-  -g, --generate_combo  Enables generating a separate file with combinatorial rules from top operators.
-  -gc COMBO_OUTPUT_FILE, --combo_output_file COMBO_OUTPUT_FILE
-                        The name of the output file for generated combinatorial rules.
-  -n COMBO_TARGET, --combo_target COMBO_TARGET
-                        The approximate number of rules to generate in combinatorial mode.
-  -l COMBO_LENGTH [COMBO_LENGTH ...], --combo_length COMBO_LENGTH [COMBO_LENGTH ...]
-                        The range of rule chain lengths for combinatorial mode (e.g., 1 3).
-  -gm, --generate_markov_rules
-                        Enables generating statistically probable rules by traversing the Markov model.
-  -ml MARKOV_LENGTH [MARKOV_LENGTH ...], --markov_length MARKOV_LENGTH [MARKOV_LENGTH ...]
-                        The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to --combo_length if not set.
-  --temp-dir TEMP_DIR   Optional: Specify a directory for temporary files.
-  --in-memory           Process all rules entirely in RAM.
-  -cb CLEANUP_BIN, --cleanup-bin CLEANUP_BIN
-                        Optional: Path to the external cleanup binary (e.g., ./cleanup-rules.bin). If provided, it will run after rule generation.
-  -ca CLEANUP_ARG, --cleanup-arg CLEANUP_ARG
-                        Argument to pass to the cleanup binary (e.g., "2" for hashcat's cleanup-rules.bin).
-
+https://roptimization.pages.dev
