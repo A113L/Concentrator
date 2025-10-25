@@ -1,6 +1,6 @@
 # Concentrator v1.4.1
 # Description: Unified Hashcat Rule Processor with Validated Combinatorial Generation
-# and new Statistical (Markov) Rule Generation. Supports recursive file search.
+# and Statistical (Markov) Rule Generation. Supports recursive file search and external cleanup
 
 import sys
 import re
@@ -532,7 +532,7 @@ if __name__ == '__main__':
     
     # Extraction Flags
     parser.add_argument('-t', '--top_rules', type=int, default=10000, help='The number of top existing rules to extract and save.')
-    parser.add_argument('-o', '--output_file', type=str, default='optimized_top_rules.txt', help='The name of the output file for extracted rules.')
+    parser.add_argument('-o', '--output_file', type=str, default='optimized_top_rules.txt', help='The name of the output file for extracted rules (also used as base for Markov output).')
     parser.add_argument('-m', '--max_length', type=int, default=31, help='The maximum length for rules to be extracted. Default is 31.')
     parser.add_argument('-s', '--statistical_sort', action='store_true', help='Sorts EXTRACTED rules by Markov sequence probability instead of raw frequency.')
     
@@ -544,8 +544,8 @@ if __name__ == '__main__':
     
     # Statistical (Markov) Generation Flag (NEW)
     parser.add_argument('-gm', '--generate_markov_rules', action='store_true', help='Enables generating statistically probable rules by traversing the Markov model.')
-    parser.add_argument('-go', '--markov_output_file', type=str, default='generated_markov_rules.txt', help='The name of the output file for generated Markov rules.')
-    
+    # Removed -go / --markov_output_file. Output file is now derived from -o.
+
     # NEW ARGUMENT FOR MARKOV LENGTH
     parser.add_argument('-ml', '--markov_length', nargs='+', type=int, default=None, help='The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to --combo_length if not set.')
 
@@ -565,7 +565,12 @@ if __name__ == '__main__':
     all_filepaths = []
     print("--- 0. Collecting Rule Files (Recursive Search) ---")
     
-    output_files_to_exclude = [args.output_file, args.combo_output_file, args.markov_output_file]
+    # Need to derive the expected Markov output file name to exclude it from input analysis
+    markov_base_name = os.path.splitext(args.output_file)[0]
+    markov_ext = os.path.splitext(args.output_file)[1]
+    markov_derived_filename = f"{markov_base_name}_markov{markov_ext if markov_ext else '.txt'}"
+    
+    output_files_to_exclude = [args.output_file, args.combo_output_file, markov_derived_filename]
     
     for path in args.paths:
         if os.path.isfile(path):
@@ -595,7 +600,7 @@ if __name__ == '__main__':
     markov_min_len, markov_max_len = None, None
 
     # Combinatorial Length Setup
-    if args.generate_combo:
+    if args.generate_combo or args.generate_markov_rules: # Need this if markov falls back to combo length
         length_source = args.combo_length
         if len(length_source) not in [1, 2]:
             print("Error: Invalid chain length range for combinatorial mode (--combo_length). Use 'L' or 'L_min L_max'.")
@@ -606,12 +611,13 @@ if __name__ == '__main__':
             print("Error: Invalid chain length range for combinatorial mode. L_min cannot be greater than L_max.")
             sys.exit(1)
 
-    # Markov Length Setup (uses -ml, falls back to -l if -ml is not set)
+    # Markov Length Setup (uses -ml, falls back to calculated combo length if -ml is not set)
     if args.generate_markov_rules:
         length_source = args.markov_length if args.markov_length is not None else args.combo_length
         
         # We need a valid length source, which should be guaranteed if generate_markov_rules is set.
         if len(length_source) not in [1, 2]:
+            # This should ideally not happen due to the check above, but for robustness:
             print("Error: Invalid chain length range for Markov mode (derived from --markov_length or --combo_length). Use 'L' or 'L_min L_max'.")
             sys.exit(1)
             
@@ -673,6 +679,11 @@ if __name__ == '__main__':
         print("--- 3. Starting STATISTICAL Markov Rule Generation (Validated) ---")
         print("!"*50)
         
+        # Derive the output filename from the main -o file
+        markov_base_name = os.path.splitext(args.output_file)[0]
+        markov_ext = os.path.splitext(args.output_file)[1]
+        markov_output_file_name = f"{markov_base_name}_markov{markov_ext if markov_ext else '.txt'}"
+        
         # Use the determined Markov lengths
         markov_rules_data = generate_rules_from_markov_model(
             markov_probabilities, 
@@ -680,8 +691,6 @@ if __name__ == '__main__':
             markov_min_len, 
             markov_max_len
         )
-        
-        markov_output_file_name = args.markov_output_file
         
         # markov_rules_data is already a list of (rule, weight) tuples, so we use 'statistical' mode for saving
         save_rules_to_file(markov_rules_data, markov_output_file_name, 'statistical') 
