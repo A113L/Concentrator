@@ -76,6 +76,6 @@ Generate up to 1 million syntactically valid combinatorial rules of length 1 to 
 -ml	--markov_length	-	length range for Markov generation. Defaults to --combo_length if not set.
 --in-memory	-	process all rules entirely in RAM (useful for small datasets, risky for large ones).
 -cb	--cleanup-bin	-	path to an external cleanup utility (e.g., cleanup-rules.bin).
--ca	--cleanup-arg	2	argument to pass to the external cleanup binary.```
-
-https://roptimization.pages.dev
+-ca	--cleanup-arg	2	argument to pass to the external cleanup binary.
+```
+https://roptimization.pages.dev/concentrator.static_workflow
