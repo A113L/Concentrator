@@ -538,7 +538,6 @@ if __name__ == '__main__':
     parser.add_argument('paths', nargs='+', help='Paths to rule files or directories to analyze. If a directory is provided, it will be searched recursively.')
     
     # --- GLOBAL OUTPUT FILENAME ---
-    # This now sets the base name for the output file regardless of the mode.
     parser.add_argument('-ob', '--output_base_name', type=str, default='concentrator_output', 
                         help='The base name for the output file. The script will append a suffix based on the mode (e.g., "_extracted.txt", "_combo.txt", "_markov.txt").')
     
@@ -639,10 +638,15 @@ if __name__ == '__main__':
         print("No operators found in files. Exiting.")
         sys.exit(1)
 
-    # --- 2. Markov Model Building ---
-    # This step is always required for statistical sorting and both generation modes.
-    markov_probabilities, total_transitions = get_markov_model(full_rule_counts)
+    # --- 2. Markov Model Building (CONDITIONAL SKIP APPLIED HERE) ---
+    markov_probabilities, total_transitions = None, None
     
+    # Build Markov Model ONLY if statistical sort or any generation mode is requested
+    if args.statistical_sort or args.generate_combo or args.generate_markov_rules:
+        markov_probabilities, total_transitions = get_markov_model(full_rule_counts)
+    else:
+        print("--- 2. Skipping Markov Model Build (Not needed for pure frequency extraction) ---")
+
     # --- EXECUTE ACTIVE MODE ---
     
     if active_mode == 'extraction':
@@ -653,6 +657,12 @@ if __name__ == '__main__':
         
         if args.statistical_sort:
             mode = 'statistical'
+            
+            # Check if model was actually built
+            if markov_probabilities is None:
+                print("Error: Statistical sort (-s) requires the Markov model, but it was skipped. Please report this as a script bug.")
+                sys.exit(1)
+                
             print("\n--- Sort Mode: Statistical Sort (Markov Weight) ---")
             sorted_rule_data = get_markov_weighted_rules(full_rule_counts, markov_probabilities, total_transitions)
         else:
