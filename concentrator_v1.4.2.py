@@ -29,9 +29,15 @@ for i in range(10):
     ALL_OPERATORS.append(f'${i}')
     ALL_OPERATORS.append(f'^{i}')
 
-REGEX_OPERATORS = [re.escape(op) for op in ALL_OPERATORS if op not in ('$', '^')] 
-REGEX_OPERATORS += [r'\$[0-9]', r'\^[0-9]', r'\:', r'\,', r'\.', r'\#', r'\(', r'\)', r'\=', r'\%', r'\!', r'\?', r'\|', r'\~', r'\+', r'\*', r'\-', r'\^', r'\$']
+# --- REGEX OPERATOR LIST BUILD ---
+operators_to_escape = [op for op in ALL_OPERATORS if not (op.startswith('$') and len(op) > 1 and op[1].isdigit()) and not (op.startswith('^') and len(op) > 1 and op[1].isdigit())]
+
+REGEX_OPERATORS = [re.escape(op) for op in operators_to_escape]
+REGEX_OPERATORS.append(r'\$[0-9]') 
+REGEX_OPERATORS.append(r'\^[0-9]') 
+
 COMPILED_REGEX = re.compile('|'.join(filter(None, sorted(list(set(REGEX_OPERATORS)), key=len, reverse=True)))) 
+# --- END REGEX OPERATOR LIST BUILD ---
 
 _TEMP_DIR_PATH = None
 _IN_MEMORY_MODE = False
@@ -293,7 +299,7 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
     Generates new rules by traversing the Markov model, prioritizing high-probability transitions.
     The generation stops attempting new rules once 'target_rules' unique, valid rules are found.
     """
-    print(f"\n--- Generating Rules via Markov Model Traversal ({min_len}-{max_len} Operators) ---")
+    print(f"\n--- Generating Rules via Markov Model Traversal ({min_len}-{max_len} Operators, Target: {target_rules}) ---")
     generated_rules = set()
     START_CHAR = '^'
     
@@ -315,7 +321,7 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
     generation_attempts = target_rules * 5 
     
     for attempt in range(generation_attempts):
-        # Integration of -t flag: Stop once the target number of unique rules is reached
+        # Stop once the target number of unique rules is reached
         if len(generated_rules) >= target_rules:
             break
 
@@ -527,29 +533,35 @@ def generate_rules_parallel(top_operators, min_len, max_len):
 if __name__ == '__main__':
     multiprocessing.freeze_support()  
     
-    parser = argparse.ArgumentParser(description='Extracts top N rules sorted by raw frequency, statistical probability, or generates VALID combinatorial/Markov rules, with optional post-processing cleanup. Supports recursive folder search.')
+    parser = argparse.ArgumentParser(description='Extracts top N rules, generates VALID combinatorial/Markov rules. Requires exactly one mode (-e, -g, or -gm). Supports recursive folder search.')
     
     parser.add_argument('paths', nargs='+', help='Paths to rule files or directories to analyze. If a directory is provided, it will be searched recursively.')
     
-    # Extraction Flags
-    parser.add_argument('-t', '--top_rules', type=int, default=10000, help='The number of top existing rules to extract and save. ALSO controls the target number of Markov-generated rules.')
-    parser.add_argument('-o', '--output_file', type=str, default='optimized_top_rules.txt', help='The name of the output file for extracted rules (also used as base for Markov output). Set to "None" or empty string to skip extraction saving.')
-    parser.add_argument('-m', '--max_length', type=int, default=31, help='The maximum length for rules to be extracted. Default is 31.')
-    parser.add_argument('-s', '--statistical_sort', action='store_true', help='Sorts EXTRACTED rules by Markov sequence probability instead of raw frequency.')
+    # --- GLOBAL OUTPUT FILENAME ---
+    # This now sets the base name for the output file regardless of the mode.
+    parser.add_argument('-ob', '--output_base_name', type=str, default='concentrator_output', 
+                        help='The base name for the output file. The script will append a suffix based on the mode (e.g., "_extracted.txt", "_combo.txt", "_markov.txt").')
     
-    # Combinatorial Generation Flags
-    parser.add_argument('-g', '--generate_combo', action='store_true', help='Enables generating a separate file with combinatorial rules from top operators.')
-    parser.add_argument('-gc', '--combo_output_file', type=str, default='generated_combos_validated.txt', help='The name of the output file for generated combinatorial rules.')
-    parser.add_argument('-n', '--combo_target', type=int, default=100000, help='The approximate number of rules to generate in combinatorial mode.')
-    parser.add_argument('-l', '--combo_length', nargs='+', type=int, default=[1, 3], help='The range of rule chain lengths for combinatorial mode (e.g., 1 3).')
+    # --- MONO MODE ENFORCEMENT GROUP (The Three Modes) ---
+    output_group = parser.add_mutually_exclusive_group(required=True)
+
+    # 1. Extraction Mode (Replaces old -o)
+    output_group.add_argument('-e', '--extract_rules', action='store_true', help='Enables rule extraction and sorting from input files. Uses -t for count.')
+    parser.add_argument('-t', '--top_rules', type=int, default=10000, help='The number of top existing rules to extract and save (used with -e).')
+    parser.add_argument('-s', '--statistical_sort', action='store_true', help='Sorts EXTRACTED rules by Markov sequence probability instead of raw frequency (used with -e).')
     
-    # Statistical (Markov) Generation Flag
-    parser.add_argument('-gm', '--generate_markov_rules', action='store_true', help='Enables generating statistically probable rules by traversing the Markov model.')
+    # 2. Combinatorial Generation Mode
+    output_group.add_argument('-g', '--generate_combo', action='store_true', help='Enables generating combinatorial rules. Uses -n for target count.')
+    parser.add_argument('-n', '--combo_target', type=int, default=100000, help='The approximate number of rules to generate in combinatorial mode (used with -g).')
+    parser.add_argument('-l', '--combo_length', nargs='+', type=int, default=[1, 3], help='The range of rule chain lengths for combinatorial mode (e.g., 1 3) (used with -g).')
     
-    # Markov Length
-    parser.add_argument('-ml', '--markov_length', nargs='+', type=int, default=None, help='The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to [1, 3] if not set.')
+    # 3. Statistical (Markov) Generation Mode
+    output_group.add_argument('-gm', '--generate_markov_rules', action='store_true', help='Enables generating statistically probable Markov rules. Uses -gt for target count.')
+    parser.add_argument('-gt', '--generate_target', type=int, default=10000, help='The target number of rules to generate in Markov mode (used with -gm).')
+    parser.add_argument('-ml', '--markov_length', nargs='+', type=int, default=None, help='The range of rule chain lengths for Markov mode (e.g., 1 5) (used with -gm). Defaults to [1, 3].')
 
     # Global/Utility Flags
+    parser.add_argument('-m', '--max_length', type=int, default=31, help='The maximum length for rules to be extracted/considered in analysis. Default is 31.')
     parser.add_argument('--temp-dir', type=str, default=None, help='Optional: Specify a directory for temporary files.')
     parser.add_argument('--in-memory', action='store_true', help='Process all rules entirely in RAM.')
 
@@ -561,24 +573,42 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    # Normalize output_file check
-    output_file_requested = args.output_file and args.output_file.lower() not in ('none', 'false')
+    # --- POST-PARSING MODE DETERMINATION & FILE NAMING ---
     
-    # --- MODE CHECK: Determine if any processing is needed ---
-    if not output_file_requested and not args.generate_markov_rules and not args.generate_combo:
-        print("Error: No output mode specified. Use -o, -g, or -gm. Exiting.")
-        sys.exit(1)
+    base_name = args.output_base_name
+    
+    if args.extract_rules:
+        active_mode = 'extraction'
+        output_suffix = '_extracted.txt'
+    elif args.generate_combo:
+        active_mode = 'combo'
+        output_suffix = '_combo.txt'
+    elif args.generate_markov_rules:
+        active_mode = 'markov'
+        output_suffix = '_markov.txt'
+        
+    output_file_name = base_name + output_suffix
+    
+    print(f"\nActive Mode: **{active_mode.upper()}** (Mono Mode Enforced)")
+    print(f"Output File Name: **{output_file_name}**")
+    
+    # Set Markov length defaults if needed
+    if args.markov_length is None:
+        markov_min_len, markov_max_len = 1, 3
+    else:
+        markov_min_len = args.markov_length[0]
+        markov_max_len = args.markov_length[-1]
+        
+    # Set Combo length defaults
+    combo_min_len = args.combo_length[0]
+    combo_max_len = args.combo_length[-1]
 
     # --- RECURSIVE FILE COLLECTION LOGIC ---
     all_filepaths = []
     print("--- 0. Collecting Rule Files (Recursive Search) ---")
     
-    # Define output file names for exclusion
-    markov_base_name = os.path.splitext(args.output_file if output_file_requested else "markov_output")[0]
-    markov_ext = os.path.splitext(args.output_file if output_file_requested else ".txt")[1]
-    markov_derived_filename = f"{markov_base_name}_markov{markov_ext if markov_ext else '.txt'}"
-    
-    output_files_to_exclude = {args.output_file, args.combo_output_file, markov_derived_filename}
+    # Ensure the determined output file is excluded from analysis
+    output_files_to_exclude = {os.path.basename(output_file_name)}
     
     for path in args.paths:
         if os.path.isfile(path):
@@ -599,44 +629,6 @@ if __name__ == '__main__':
     print(f"Found {len(all_filepaths)} rule files to analyze.")
     
     set_global_flags(args.temp_dir, args.in_memory)
-    
-    
-    # --- LENGTH VALIDATION FOR GENERATION MODES ---
-    combo_min_len, combo_max_len = 1, 3
-    markov_min_len, markov_max_len = 1, 3
-
-    if args.generate_combo: 
-        # Only validate Combinatorial Lengths if -g is present
-        length_source = args.combo_length
-        if len(length_source) not in [1, 2]:
-            print("Error: Invalid chain length range for combinatorial mode (--combo_length). Use 'L' or 'L_min L_max'.")
-            sys.exit(1)
-        combo_min_len = length_source[0]
-        combo_max_len = length_source[-1]
-        if combo_min_len > combo_max_len:
-            print("Error: Invalid chain length range for combinatorial mode. L_min cannot be greater than L_max.")
-            sys.exit(1)
-
-    if args.generate_markov_rules:
-        # Only validate Markov Lengths if -gm is present
-        
-        # Use -ml if provided, otherwise default to [1, 3]. Do NOT rely on --combo_length.
-        length_source = args.markov_length if args.markov_length is not None else [1, 3]
-        
-        if len(length_source) not in [1, 2]:
-            print("Error: Invalid chain length range for Markov mode (--markov_length). Use 'L' or 'L_min L_max'.")
-            sys.exit(1)
-            
-        markov_min_len = length_source[0]
-        markov_max_len = length_source[-1]
-        
-        if markov_min_len > markov_max_len:
-            print("Error: Invalid chain length range for Markov mode. L_min cannot be greater than L_max.")
-            sys.exit(1)
-            
-        source_flag = "(--markov_length)" if args.markov_length is not None else "(default [1, 3])"
-        print(f"Markov Generation Length Range set to: {markov_min_len}-{markov_max_len} {source_flag}")
-
 
     # --- 1. Parallel Rule File Analysis ---
     print("--- 1. Starting Parallel Rule File Analysis ---")
@@ -648,78 +640,59 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # --- 2. Markov Model Building ---
+    # This step is always required for statistical sorting and both generation modes.
     markov_probabilities, total_transitions = get_markov_model(full_rule_counts)
-
-
-    # --- 3. & 4. Extraction/Statistical Sort and Saving (-o or -s) ---
-    if output_file_requested:
-        # Determine Sorting Method and Extract Top N
+    
+    # --- EXECUTE ACTIVE MODE ---
+    
+    if active_mode == 'extraction':
+        # --- Extraction/Statistical Sort and Saving (-e) ---
+        print("\n" + "~"*50)
+        print("--- 3. Rule Extraction and Saving ---")
+        print("~"*50)
+        
         if args.statistical_sort:
             mode = 'statistical'
-            print("\n--- Mode: Statistical Sort (Markov Weight) ---")
+            print("\n--- Sort Mode: Statistical Sort (Markov Weight) ---")
             sorted_rule_data = get_markov_weighted_rules(full_rule_counts, markov_probabilities, total_transitions)
         else:
             mode = 'frequency'
-            print("\n--- Mode: Frequency Sort (Raw Count) ---")
+            print("\n--- Sort Mode: Frequency Sort (Raw Count) ---")
             sorted_rule_data = sorted(full_rule_counts.items(), key=lambda item: item[1], reverse=True)
             
         top_rules_data = sorted_rule_data[:args.top_rules]
 
-        # Display analysis results and Save Extracted Rules
-        print(f"\n--- 2. Analysis Results (Mode: {mode.upper()}) ---")
-        print("Most frequently used operators (TOP 10):")
-        for op, count in sorted_op_counts[:10]:
-            print(f"  '{op}': {count} times")
-            
         print(f"\nExtracted {len(top_rules_data)} top unique rules (max length: {args.max_length} characters).")
-        output_file_name = args.output_file
         save_rules_to_file(top_rules_data, output_file_name, mode)
         
         if args.cleanup_bin:
-            print("\n" + "~"*50)
-            print("--- Running Cleanup on Extracted Rules ---")
-            print("~"*50)
             run_and_rename_cleanup(output_file_name, args.cleanup_bin, args.cleanup_arg)
         
-    else:
-        # Still display operator counts if extraction saving is skipped but analysis was performed
-        print(f"\n--- Analysis Results (Extraction Saving Skipped) ---")
-        print("Most frequently used operators (TOP 10):")
-        for op, count in sorted_op_counts[:10]:
-            print(f"  '{op}': {count} times")
-
-
-    # --- 5. STATISTICAL (MARKOV) RULE GENERATION (-gm) ---
-    if args.generate_markov_rules:
+    elif active_mode == 'markov':
+        # --- STATISTICAL (MARKOV) RULE GENERATION (-gm) ---
         print("\n" + "!"*50)
         print("--- 3. Starting STATISTICAL Markov Rule Generation (Validated) ---")
         print("!"*50)
         
-        # Use derived name for Markov output file
-        markov_output_file_name = f"{markov_base_name}_markov{markov_ext if markov_ext else '.txt'}"
-        
         markov_rules_data = generate_rules_from_markov_model(
             markov_probabilities, 
-            args.top_rules, # Uses -t/--top_rules flag
+            args.generate_target, 
             markov_min_len, 
             markov_max_len
         )
         
-        save_rules_to_file(markov_rules_data, markov_output_file_name, 'statistical')
+        save_rules_to_file(markov_rules_data, output_file_name, 'statistical')
 
         if args.cleanup_bin:
-            print("\n" + "~"*50)
-            print("--- Running Cleanup on Markov Generated Rules ---")
-            print("~"*50)
-            run_and_rename_cleanup(markov_output_file_name, args.cleanup_bin, args.cleanup_arg)
-
-    # --- 6. COMBINATORIAL RULE GENERATION (-g) ---
-    if args.generate_combo:
+            run_and_rename_cleanup(output_file_name, args.cleanup_bin, args.cleanup_arg)
+        
+    elif active_mode == 'combo':
+        # --- COMBINATORIAL RULE GENERATION (-g) ---
         print("\n" + "#"*50)
-        print("--- 4. Starting COMBINATORIAL Rule Generation (Validated) ---")
+        print("--- 3. Starting COMBINATORIAL Rule Generation (Validated) ---")
         print("#"*50)
         
-        # 6a. Find minimum number of top operators needed
+        # 3a. Find minimum number of top operators needed
         top_operators_needed = find_min_operators_for_target(
             sorted_op_counts, 
             args.combo_target, 
@@ -729,22 +702,18 @@ if __name__ == '__main__':
         
         print(f"Using the top {len(top_operators_needed)} operators to approximate {args.combo_target} rules.")
         
-        # 6b. Generate rules in parallel with syntax validation
+        # 3b. Generate rules in parallel with syntax validation
         generated_rules_set = generate_rules_parallel(
             top_operators_needed, 
             combo_min_len, 
             combo_max_len
         )
         
-        # 6c. Save the generated rules
-        combo_output_file_name = args.combo_output_file
-        save_rules_to_file(generated_rules_set, combo_output_file_name, 'combo')
+        # 3c. Save the generated rules
+        save_rules_to_file(generated_rules_set, output_file_name, 'combo')
 
         if args.cleanup_bin:
-            print("\n" + "~"*50)
-            print("--- Running Cleanup on Combinatorial Generated Rules ---")
-            print("~"*50)
-            run_and_rename_cleanup(combo_output_file_name, args.cleanup_bin, args.cleanup_arg)
+            run_and_rename_cleanup(output_file_name, args.cleanup_bin, args.cleanup_arg)
 
     print("\n--- Processing Complete ---")
     sys.exit(0)
