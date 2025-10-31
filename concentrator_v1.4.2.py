@@ -1,6 +1,6 @@
-# Concentrator v1.4.1
+# Concentrator v1.4.2
 # Description: Unified Hashcat Rule Processor with Validated Combinatorial Generation
-# and Statistical (Markov) Rule Generation. Supports recursive file search and external cleanup
+# and Statistical (Markov) Rule Generation. Supports recursive file search and external cleanup.
 
 import sys
 import re
@@ -12,7 +12,7 @@ import multiprocessing
 import os
 import tempfile
 import subprocess
-import random # Needed for Markov generation
+import random 
 
 # --- Hashcat Rule Syntax Definitions ---
 ALL_RULE_CHARS = set("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:,.lu.#()=%!?|~+*-^$sStTiIoOcCrRyYzZeEfFxXdDpPbBqQ`[]><@&vV")
@@ -29,9 +29,9 @@ for i in range(10):
     ALL_OPERATORS.append(f'${i}')
     ALL_OPERATORS.append(f'^{i}')
 
-REGEX_OPERATORS = [re.escape(op) for op in ALL_OPERATORS if op not in ('$', '^')] # Exclude $ and ^ as standalone single chars in this list
+REGEX_OPERATORS = [re.escape(op) for op in ALL_OPERATORS if op not in ('$', '^')] 
 REGEX_OPERATORS += [r'\$[0-9]', r'\^[0-9]', r'\:', r'\,', r'\.', r'\#', r'\(', r'\)', r'\=', r'\%', r'\!', r'\?', r'\|', r'\~', r'\+', r'\*', r'\-', r'\^', r'\$']
-COMPILED_REGEX = re.compile('|'.join(filter(None, sorted(list(set(REGEX_OPERATORS)), key=len, reverse=True)))) # Sort by length for correct matching
+COMPILED_REGEX = re.compile('|'.join(filter(None, sorted(list(set(REGEX_OPERATORS)), key=len, reverse=True)))) 
 
 _TEMP_DIR_PATH = None
 _IN_MEMORY_MODE = False
@@ -205,7 +205,7 @@ def analyze_rule_files_parallel(filepaths, max_rule_length):
             except Exception as e:
                 print(f"Error merging temp file {temp_filepath}: {e}")
             
-    print(f"Total rules loaded into memory: {len(total_all_clean_rules)}")
+    print(f"Total unique rules loaded into memory: {len(total_full_rule_counts)}")
     
     sorted_op_counts = sorted(total_operator_counts.items(), key=lambda item: item[1], reverse=True)
     return sorted_op_counts, total_full_rule_counts, total_all_clean_rules
@@ -258,7 +258,7 @@ def get_markov_weighted_rules(unique_rules, markov_probabilities, total_transiti
             probability = markov_probabilities[current_prefix][next_char]
             log_probability_sum += math.log(probability)
         else:
-            continue # Skip rules not starting with a known sequence
+            continue 
             
         # P(Oi | O_i-1) or P(Oi | O_i-2 O_i-1)
         for i in range(len(rule) - 1):
@@ -269,7 +269,7 @@ def get_markov_weighted_rules(unique_rules, markov_probabilities, total_transiti
                 if current_prefix in markov_probabilities and next_char in markov_probabilities[current_prefix]:
                     probability = markov_probabilities[current_prefix][next_char]
                     log_probability_sum += math.log(probability)
-                    continue # Trigram found, move to next step
+                    continue 
             
             # Fallback to Bigram (O_i -> O_i+1)
             current_prefix = rule[i]  
@@ -287,7 +287,7 @@ def get_markov_weighted_rules(unique_rules, markov_probabilities, total_transiti
     sorted_weighted_rules = sorted(weighted_rules, key=lambda item: item[1], reverse=True)
     return sorted_weighted_rules
 
-# --- UPDATED: Markov Rule Generation Logic ---
+# --- Markov Rule Generation Logic ---
 def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len, max_len):
     """
     Generates new rules by traversing the Markov model, prioritizing high-probability transitions.
@@ -476,7 +476,7 @@ def run_and_rename_cleanup(input_file, command_binary, command_arg):
         print(f"CLEANUP ERROR: Failed to rename file: {e}")
         return False
     
-# --- Combinatorial Generation Functions (for completeness, remain the same) ---
+# --- Combinatorial Generation Functions ---
 
 def find_min_operators_for_target(sorted_operators, target_rules, min_len, max_len):
     """Finds the minimum number of top operators needed to generate the target number of rules."""
@@ -533,7 +533,7 @@ if __name__ == '__main__':
     
     # Extraction Flags
     parser.add_argument('-t', '--top_rules', type=int, default=10000, help='The number of top existing rules to extract and save. ALSO controls the target number of Markov-generated rules.')
-    parser.add_argument('-o', '--output_file', type=str, default='optimized_top_rules.txt', help='The name of the output file for extracted rules (also used as base for Markov output).')
+    parser.add_argument('-o', '--output_file', type=str, default='optimized_top_rules.txt', help='The name of the output file for extracted rules (also used as base for Markov output). Set to "None" or empty string to skip extraction saving.')
     parser.add_argument('-m', '--max_length', type=int, default=31, help='The maximum length for rules to be extracted. Default is 31.')
     parser.add_argument('-s', '--statistical_sort', action='store_true', help='Sorts EXTRACTED rules by Markov sequence probability instead of raw frequency.')
     
@@ -543,11 +543,11 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--combo_target', type=int, default=100000, help='The approximate number of rules to generate in combinatorial mode.')
     parser.add_argument('-l', '--combo_length', nargs='+', type=int, default=[1, 3], help='The range of rule chain lengths for combinatorial mode (e.g., 1 3).')
     
-    # Statistical (Markov) Generation Flag (NEW)
+    # Statistical (Markov) Generation Flag
     parser.add_argument('-gm', '--generate_markov_rules', action='store_true', help='Enables generating statistically probable rules by traversing the Markov model.')
     
-    # NEW ARGUMENT FOR MARKOV LENGTH
-    parser.add_argument('-ml', '--markov_length', nargs='+', type=int, default=None, help='The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to --combo_length if not set.')
+    # Markov Length
+    parser.add_argument('-ml', '--markov_length', nargs='+', type=int, default=None, help='The range of rule chain lengths for Markov mode (e.g., 1 5). Defaults to [1, 3] if not set.')
 
     # Global/Utility Flags
     parser.add_argument('--temp-dir', type=str, default=None, help='Optional: Specify a directory for temporary files.')
@@ -561,16 +561,24 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
+    # Normalize output_file check
+    output_file_requested = args.output_file and args.output_file.lower() not in ('none', 'false')
+    
+    # --- MODE CHECK: Determine if any processing is needed ---
+    if not output_file_requested and not args.generate_markov_rules and not args.generate_combo:
+        print("Error: No output mode specified. Use -o, -g, or -gm. Exiting.")
+        sys.exit(1)
+
     # --- RECURSIVE FILE COLLECTION LOGIC ---
     all_filepaths = []
     print("--- 0. Collecting Rule Files (Recursive Search) ---")
     
-    # Need to derive the expected Markov output file name to exclude it from input analysis
-    markov_base_name = os.path.splitext(args.output_file)[0]
-    markov_ext = os.path.splitext(args.output_file)[1]
+    # Define output file names for exclusion
+    markov_base_name = os.path.splitext(args.output_file if output_file_requested else "markov_output")[0]
+    markov_ext = os.path.splitext(args.output_file if output_file_requested else ".txt")[1]
     markov_derived_filename = f"{markov_base_name}_markov{markov_ext if markov_ext else '.txt'}"
     
-    output_files_to_exclude = [args.output_file, args.combo_output_file, markov_derived_filename]
+    output_files_to_exclude = {args.output_file, args.combo_output_file, markov_derived_filename}
     
     for path in args.paths:
         if os.path.isfile(path):
@@ -583,8 +591,6 @@ if __name__ == '__main__':
                     if file.lower().endswith(('.rule', '.txt', '.lst')) and \
                        file not in output_files_to_exclude:
                         all_filepaths.append(os.path.join(root, file))
-        else:
-            print(f"Warning: Path not found or not supported (must be file or directory): {path}")
 
     if not all_filepaths:
         print("Error: No rule files found to process. Exiting.")
@@ -596,11 +602,11 @@ if __name__ == '__main__':
     
     
     # --- LENGTH VALIDATION FOR GENERATION MODES ---
-    combo_min_len, combo_max_len = None, None
-    markov_min_len, markov_max_len = None, None
+    combo_min_len, combo_max_len = 1, 3
+    markov_min_len, markov_max_len = 1, 3
 
-    # Combinatorial Length Setup
-    if args.generate_combo or args.generate_markov_rules: # Need this if markov falls back to combo length
+    if args.generate_combo: 
+        # Only validate Combinatorial Lengths if -g is present
         length_source = args.combo_length
         if len(length_source) not in [1, 2]:
             print("Error: Invalid chain length range for combinatorial mode (--combo_length). Use 'L' or 'L_min L_max'.")
@@ -611,14 +617,14 @@ if __name__ == '__main__':
             print("Error: Invalid chain length range for combinatorial mode. L_min cannot be greater than L_max.")
             sys.exit(1)
 
-    # Markov Length Setup (uses -ml, falls back to calculated combo length if -ml is not set)
     if args.generate_markov_rules:
-        length_source = args.markov_length if args.markov_length is not None else args.combo_length
+        # Only validate Markov Lengths if -gm is present
         
-        # We need a valid length source, which should be guaranteed if generate_markov_rules is set.
+        # Use -ml if provided, otherwise default to [1, 3]. Do NOT rely on --combo_length.
+        length_source = args.markov_length if args.markov_length is not None else [1, 3]
+        
         if len(length_source) not in [1, 2]:
-            # This should ideally not happen due to the check above, but for robustness:
-            print("Error: Invalid chain length range for Markov mode (derived from --markov_length or --combo_length). Use 'L' or 'L_min L_max'.")
+            print("Error: Invalid chain length range for Markov mode (--markov_length). Use 'L' or 'L_min L_max'.")
             sys.exit(1)
             
         markov_min_len = length_source[0]
@@ -628,7 +634,7 @@ if __name__ == '__main__':
             print("Error: Invalid chain length range for Markov mode. L_min cannot be greater than L_max.")
             sys.exit(1)
             
-        source_flag = "(--markov_length)" if args.markov_length is not None else "(--combo_length fallback)"
+        source_flag = "(--markov_length)" if args.markov_length is not None else "(default [1, 3])"
         print(f"Markov Generation Length Range set to: {markov_min_len}-{markov_max_len} {source_flag}")
 
 
@@ -641,52 +647,60 @@ if __name__ == '__main__':
         print("No operators found in files. Exiting.")
         sys.exit(1)
 
-    # --- 2. Markov Model Building (Needed for both extraction and generation) ---
+    # --- 2. Markov Model Building ---
     markov_probabilities, total_transitions = get_markov_model(full_rule_counts)
 
 
-    # --- 3. Determine Sorting Method and Extract Top N ---
-    if args.statistical_sort:
-        mode = 'statistical'
-        print("\n--- Mode: Statistical Sort (Markov Weight) ---")
-        sorted_rule_data = get_markov_weighted_rules(full_rule_counts, markov_probabilities, total_transitions)
-    else:
-        mode = 'frequency'
-        print("\n--- Mode: Frequency Sort (Raw Count) ---")
-        sorted_rule_data = sorted(full_rule_counts.items(), key=lambda item: item[1], reverse=True)
-        
-    top_rules_data = sorted_rule_data[:args.top_rules]
+    # --- 3. & 4. Extraction/Statistical Sort and Saving (-o or -s) ---
+    if output_file_requested:
+        # Determine Sorting Method and Extract Top N
+        if args.statistical_sort:
+            mode = 'statistical'
+            print("\n--- Mode: Statistical Sort (Markov Weight) ---")
+            sorted_rule_data = get_markov_weighted_rules(full_rule_counts, markov_probabilities, total_transitions)
+        else:
+            mode = 'frequency'
+            print("\n--- Mode: Frequency Sort (Raw Count) ---")
+            sorted_rule_data = sorted(full_rule_counts.items(), key=lambda item: item[1], reverse=True)
+            
+        top_rules_data = sorted_rule_data[:args.top_rules]
 
-    # --- 4. Display analysis results and Save Extracted Rules ---
-    print(f"\n--- 2. Analysis Results (Mode: {mode.upper()}) ---")
-    print("Most frequently used operators (TOP 10):")
-    for op, count in sorted_op_counts[:10]:
-        print(f"  '{op}': {count} times")
+        # Display analysis results and Save Extracted Rules
+        print(f"\n--- 2. Analysis Results (Mode: {mode.upper()}) ---")
+        print("Most frequently used operators (TOP 10):")
+        for op, count in sorted_op_counts[:10]:
+            print(f"  '{op}': {count} times")
+            
+        print(f"\nExtracted {len(top_rules_data)} top unique rules (max length: {args.max_length} characters).")
+        output_file_name = args.output_file
+        save_rules_to_file(top_rules_data, output_file_name, mode)
         
-    print(f"\nExtracted {len(top_rules_data)} top unique rules (max length: {args.max_length} characters).")
-    output_file_name = args.output_file
-    save_rules_to_file(top_rules_data, output_file_name, mode)
-    
-    if args.cleanup_bin:
-        print("\n" + "~"*50)
-        print("--- Running Cleanup on Extracted Rules ---")
-        print("~"*50)
-        run_and_rename_cleanup(output_file_name, args.cleanup_bin, args.cleanup_arg)
+        if args.cleanup_bin:
+            print("\n" + "~"*50)
+            print("--- Running Cleanup on Extracted Rules ---")
+            print("~"*50)
+            run_and_rename_cleanup(output_file_name, args.cleanup_bin, args.cleanup_arg)
         
-    # --- 5. STATISTICAL (MARKOV) RULE GENERATION ---
+    else:
+        # Still display operator counts if extraction saving is skipped but analysis was performed
+        print(f"\n--- Analysis Results (Extraction Saving Skipped) ---")
+        print("Most frequently used operators (TOP 10):")
+        for op, count in sorted_op_counts[:10]:
+            print(f"  '{op}': {count} times")
+
+
+    # --- 5. STATISTICAL (MARKOV) RULE GENERATION (-gm) ---
     if args.generate_markov_rules:
         print("\n" + "!"*50)
         print("--- 3. Starting STATISTICAL Markov Rule Generation (Validated) ---")
         print("!"*50)
         
-        markov_base_name = os.path.splitext(args.output_file)[0]
-        markov_ext = os.path.splitext(args.output_file)[1]
+        # Use derived name for Markov output file
         markov_output_file_name = f"{markov_base_name}_markov{markov_ext if markov_ext else '.txt'}"
         
-        # Use -t/--top_rules for Markov target
         markov_rules_data = generate_rules_from_markov_model(
             markov_probabilities, 
-            args.top_rules, 
+            args.top_rules, # Uses -t/--top_rules flag
             markov_min_len, 
             markov_max_len
         )
@@ -699,7 +713,7 @@ if __name__ == '__main__':
             print("~"*50)
             run_and_rename_cleanup(markov_output_file_name, args.cleanup_bin, args.cleanup_arg)
 
-    # --- 6. COMBINATORIAL RULE GENERATION ---
+    # --- 6. COMBINATORIAL RULE GENERATION (-g) ---
     if args.generate_combo:
         print("\n" + "#"*50)
         print("--- 4. Starting COMBINATORIAL Rule Generation (Validated) ---")
