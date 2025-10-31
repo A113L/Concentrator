@@ -43,19 +43,19 @@ You need Python 3.x. No external non-standard libraries are strictly required.
 Analyze rule files in the current directory and its subfolders, then extract the top 50,000 rules sorted by raw frequency:
 
 
-```python3 concentrator_v1.4.1.py . -o top_50k_freq.rule -t 50000```
+```python3 concentrator_v1.4.1.py . -ob top_50k_freq.rule -t 50000```
 
 **Statistical Extraction**
 
 Extract the top 10,000 existing rules, but sort them by their Markov sequence probability (statistical weight):
 
-```python3 concentrator_v1.4.1.py ./path/to/rules/ -s -t 10000 -o top_10k_stat.rule```
+```python3 concentrator_v1.4.1.py ./path/to/rules/ -s -t 10000 -ob top_10k_stat.rule```
 
 **Validated Markov Rule Generation**
 
 Generate 200,000 new, statistically probable rules of length 1 to 5, and save them to a derived file name.
 
-```python3 concentrator_v1.4.1.py ./path/to/rules/ --generate_markov_rules -n 200000 -ml 1 5 -o base_rules.rule```
+```python3 concentrator_v1.4.1.py ./path/to/rules/ --generate_markov_rules -n 200000 -ml 1 5 -ob base_rules.rule```
 - Output will be saved to: base_rules_markov.rule
 
 **Validated Combinatorial Generation with Cleanup**
