@@ -1,71 +1,44 @@
-🛡️ **Concentrator: Unified Hashcat Rule Processor (v1.4.1)**
+**Concentrator v1.4.2**
 
-Concentrator is a powerful, parallelized Python script designed to analyze existing Hashcat rule sets and generate new, highly optimized rules. It supports three core modes: Frequency Extraction, Statistical (Markov) Extraction, and Validated Combinatorial/Markov Rule Generation.
+Unified Hashcat Rule Processor with validated combinatorial generation and statistical (Markov) rule generation.
 
-It is built with speed and accuracy in mind, featuring multiprocessing, robust Hashcat syntax validation, and optional external cleanup integration (e.g., for cleanup-rules.bin).
+**Features**
 
-✨ **Features**
+- 3 Processing Modes: Extract, Generate Combinatorial, Generate Markov
 
-1. Recursive File Search: Analyzes rule files in specified directories and subdirectories.
+- Parallel Processing: Multi-core file analysis
 
-2. Parallel Processing: Uses multiprocessing to speed up rule file analysis.
+- Syntax Validation: Ensures generated rules are valid Hashcat syntax
 
-3. Hashcat Syntax Validation: Ensures all generated rules (Combinatorial and Markov) are syntactically correct (i.e., operators have the right number of arguments).
+- Statistical Modeling: Markov chain probability for rule sequences
 
-**Extraction Modes:**
+- External Cleanup: Optional integration with Hashcat's cleanup tools
 
-1. Frequency: Extracts the most frequently occurring unique rules.
+**Examples:**
 
-2. Statistical (Markov): Extracts existing rules sorted by their statistical probability (Markov Log-Probability), prioritizing common, effective rule chains.
+```
+# Extract top 10k rules by frequency
+python concentrator.py -e -t 10000 rules/ -ob my_rules
 
-**Generation Modes:**
+# Extract top 5k rules by statistical weight
+python concentrator.py -e -s -t 5000 rules/ -ob statistical_rules
+```
 
-1. Combinatorial Generation: Generates new rules from the most frequent operators, up to a target count, with full syntax validation.
+```
+# Generate ~100k rules using top operators (lengths 1-3)
+python concentrator.py -g -n 100000 -l 1 3 rules/ -ob combo_rules
+```
 
-2. Statistical (Markov) Generation: Generates new rules by traversing a statistical Markov model built from the input rules, creating statistically probable and syntactically valid chains.
+```
+# Generate 10k statistically probable rules
+python concentrator.py -gm -gt 10000 -ml 1 5 rules/ -ob markov_rules
+```
 
-3. External Cleanup Integration: Supports running an external rule cleanup tool (like Hashcat's cleanup-rules.bin) on the generated output files for post-processing.
+```
+# Generate rules and run Hashcat's cleanup-rules.bin
+python concentrator.py -gm -gt 5000 rules/ -ob clean_rules -cb ./cleanup-rules.bin -ca 2
+```
 
-🚀 **Usage**
-
-Prerequisites
-
-You need Python 3.x. No external non-standard libraries are strictly required.
-
-- Clone the repository (or just download the script)
-
-```git clone https://github.com/A113L/Concentrator.git```
-
-```cd Concentrator```
-
-**Basic Analysis & Frequency Extraction**
-
-Analyze rule files in the current directory and its subfolders, then extract the top 50,000 rules sorted by raw frequency:
-
-
-```python3 concentrator_v1.4.1.py . -ob top_50k_freq.rule -t 50000```
-
-**Statistical Extraction**
-
-Extract the top 10,000 existing rules, but sort them by their Markov sequence probability (statistical weight):
-
-```python3 concentrator_v1.4.1.py ./path/to/rules/ -s -t 10000 -ob top_10k_stat.rule```
-
-**Validated Markov Rule Generation**
-
-Generate 200,000 new, statistically probable rules of length 1 to 5, and save them to a derived file name.
-
-```python3 concentrator_v1.4.1.py ./path/to/rules/ --generate_markov_rules -n 200000 -ml 1 5 -ob base_rules.rule```
-- Output will be saved to: base_rules_markov.rule
-
-**Validated Combinatorial Generation with Cleanup**
-
-Generate up to 1 million syntactically valid combinatorial rules of length 1 to 3, and then pipe the output through an external cleanup utility.
-
-
-```python3 concentrator_v1.4.1.py . --generate_combo -n 1000000 -l 1 3 -cb /usr/local/bin/cleanup-rules.bin -ca 2 -gc generated_combos.rule```
-
-- The final cleaned file will be renamed like: generated_combos_CLEANED_2_[COUNT].rule
 
 **Concentrator command line arguments**
 
