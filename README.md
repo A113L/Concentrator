@@ -84,4 +84,4 @@ options:
                         Argument to pass to the cleanup binary (e.g., "2" for hashcat's cleanup-rules.bin).
 
 ```
-https://hcrulestools.pages.dev/concentrator.static_workflow
+https://hcrt.pages.dev/concentrator.static_workflow
