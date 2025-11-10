@@ -13,6 +13,7 @@ import tempfile
 import subprocess
 import random
 import numpy as np
+import psutil
 
 try:
     import pyopencl as cl
@@ -53,6 +54,55 @@ _VALID_CHARS = ALL_RULE_CHARS
 _OPENCL_CONTEXT = None
 _OPENCL_QUEUE = None
 _OPENCL_PROGRAM = None
+
+# --- RAM Usage Monitoring ---
+def check_ram_usage():
+    """Check current RAM and swap usage and return status information"""
+    memory = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    
+    return {
+        'ram_percent': memory.percent,
+        'ram_used_gb': memory.used / (1024**3),
+        'ram_total_gb': memory.total / (1024**3),
+        'swap_percent': swap.percent,
+        'swap_used_gb': swap.used / (1024**3),
+        'swap_total_gb': swap.total / (1024**3),
+        'using_swap': swap.used > 0
+    }
+
+def print_memory_status():
+    """Print current memory status"""
+    mem_info = check_ram_usage()
+    
+    print(f"📊 Memory Status: RAM {mem_info['ram_percent']:.1f}% ({mem_info['ram_used_gb']:.1f}/{mem_info['ram_total_gb']:.1f} GB)", end="")
+    
+    if mem_info['swap_total_gb'] > 0:
+        if mem_info['using_swap']:
+            print(f" | 💾 SWAP ACTIVE: {mem_info['swap_percent']:.1f}% ({mem_info['swap_used_gb']:.1f}/{mem_info['swap_total_gb']:.1f} GB)")
+        else:
+            print(f" | 💾 Swap available: {mem_info['swap_total_gb']:.1f} GB")
+    else:
+        print(" | 💾 No swap available")
+
+def memory_intensive_operation_warning(operation_name):
+    """Warn user about memory-intensive operations and check if they want to continue"""
+    mem_info = check_ram_usage()
+    
+    if mem_info['ram_percent'] > 85:
+        print(f"⚠️  WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%) for {operation_name}")
+        print_memory_status()
+        
+        if mem_info['swap_total_gb'] == 0:
+            print("🚫 CRITICAL: No swap space available. System may become unstable.")
+            response = input("Continue with memory-intensive operation? (y/N): ").strip().lower()
+            return response in ('y', 'yes')
+        else:
+            print("💡 System will use swap space. Performance may be slower.")
+            response = input("Continue with memory-intensive operation? (Y/n): ").strip().lower()
+            return response not in ('n', 'no')
+    
+    return True
 
 # --- OpenCL Setup and Kernels ---
 OPENCL_VALIDATION_KERNEL = """
@@ -466,6 +516,32 @@ def is_valid_hashcat_rule(rule: str, op_reqs: dict, valid_chars: set) -> bool:
             
     return True
 
+# --- Recursive File Search with Depth Limit ---
+def find_rule_files_recursive(paths, max_depth=3):
+    """Find rule files recursively with depth limit"""
+    all_filepaths = []
+    
+    for path in paths:
+        if os.path.isfile(path):
+            if path.lower().endswith(('.rule', '.txt', '.lst')):
+                all_filepaths.append(path)
+        elif os.path.isdir(path):
+            print(f"Searching directory: {path} (max depth: {max_depth})...")
+            for root, dirs, files in os.walk(path):
+                # Calculate current depth
+                current_depth = root[len(path):].count(os.sep)
+                if current_depth >= max_depth:
+                    # Don't go deeper into subdirectories at max depth
+                    dirs.clear()
+                    continue
+                    
+                for file in files:
+                    if file.lower().endswith(('.rule', '.txt', '.lst')):
+                        full_path = os.path.join(root, file)
+                        all_filepaths.append(full_path)
+    
+    return all_filepaths
+
 # --- Core Worker Function for File Analysis ---
 def process_single_file(filepath, max_rule_length):
     """Processes a single rule file and counts frequencies."""
@@ -589,6 +665,9 @@ def analyze_rule_files_parallel(filepaths, max_rule_length):
 # --- Markov and Extraction Functions ---
 def get_markov_model(unique_rules):
     """Builds the Markov model (counts) and transition probabilities."""
+    if not memory_intensive_operation_warning("Markov model building"):
+        return None, None
+        
     print("\n--- Building Markov Sequence Probability Model ---")
     markov_model_counts = defaultdict(lambda: defaultdict(int))
     START_CHAR = '^'             
@@ -621,6 +700,9 @@ def get_markov_model(unique_rules):
 
 def get_markov_weighted_rules(unique_rules, markov_probabilities, total_transitions):
     """Calculates the log-probability weight for each unique rule based on the model."""
+    if not memory_intensive_operation_warning("Markov weighting"):
+        return []
+        
     weighted_rules = []
 
     # 3. Calculate Log-Probability Weight for each rule
@@ -669,6 +751,9 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
     Generates new rules by traversing the Markov model, prioritizing high-probability transitions.
     The generation stops attempting new rules once 'target_rules' unique, valid rules are found.
     """
+    if not memory_intensive_operation_warning("Markov rule generation"):
+        return []
+        
     print(f"\n--- Generating Rules via Markov Model Traversal ({min_len}-{max_len} Operators, Target: {target_rules}) ---")
     generated_rules = set()
     START_CHAR = '^'
@@ -884,6 +969,9 @@ def generate_rules_parallel(top_operators, min_len, max_len):
     """
     Generates all VALID combinatorial rules in parallel based on a list of operators and a length range.
     """
+    if not memory_intensive_operation_warning("combinatorial generation"):
+        return set()
+        
     all_lengths = list(range(min_len, max_len + 1))
     
     tasks = [(top_operators, length, _OP_REQS, _VALID_CHARS) for length in all_lengths]
@@ -945,7 +1033,7 @@ def get_file_paths_interactive():
         
         print("\nOptions:")
         print("  1. Add a file")
-        print("  2. Add a folder (recursive search)")
+        print("  2. Add a folder (recursive search, max depth 3)")
         print("  3. Remove a file/folder")
         print("  4. Start processing")
         
@@ -967,7 +1055,7 @@ def get_file_paths_interactive():
             if os.path.isdir(folder_path):
                 if folder_path not in paths:
                     paths.append(folder_path)
-                    print(f"Added: {folder_path}")
+                    print(f"Added: {folder_path} (will search recursively, max depth 3)")
                 else:
                     print("Folder already in list")
             else:
@@ -1179,7 +1267,7 @@ def interactive_mode():
     print("\nThis tool processes Hashcat rules with GPU acceleration and")
     print("advanced generation techniques.")
     print("\nUSAGE MINIMIZER TIP: After generating rules, consider using")
-    print("Hashcat's 'rulefilter' or 'cleanup-rules.bin' to remove")
+    print("rulefilter like 'monimizer' or Hashcat's 'cleanup-rules.bin' to remove")
     print("redundant or ineffective rules, reducing file size and")
     print("improving cracking performance.")
     print("="*60)
@@ -1231,6 +1319,20 @@ def interactive_mode():
 if __name__ == '__main__':
     multiprocessing.freeze_support()  
     
+    # Check RAM usage at startup
+    print_memory_status()
+    mem_info = check_ram_usage()
+    
+    if mem_info['ram_percent'] > 85:
+        print(f"⚠️  WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%)")
+        if mem_info['swap_total_gb'] == 0:
+            print("🚫 CRITICAL: No swap space available. System may become unstable.")
+            proceed = get_yes_no("Continue anyway? (y/N): ", default=False)
+            if not proceed:
+                sys.exit(1)
+        else:
+            print("💡 System will use swap space. Performance may be slower.")
+    
     # Check if we should use interactive mode
     if len(sys.argv) == 1:
         # Interactive mode
@@ -1270,9 +1372,9 @@ if __name__ == '__main__':
         
     else:
         # CLI mode (for backward compatibility)
-        parser = argparse.ArgumentParser(description='GPU Accelerated Hashcat Rule Processor with OpenCL support. Extracts top N rules, generates VALID combinatorial/Markov rules. Requires exactly one mode (-e, -g, or -gm). Supports recursive folder search.')
+        parser = argparse.ArgumentParser(description='GPU Accelerated Hashcat Rule Processor with OpenCL support. Extracts top N rules, generates VALID combinatorial/Markov rules. Requires exactly one mode (-e, -g, or -gm). Supports recursive folder search (max depth 3).')
         
-        parser.add_argument('paths', nargs='+', help='Paths to rule files or directories to analyze. If a directory is provided, it will be searched recursively.')
+        parser.add_argument('paths', nargs='+', help='Paths to rule files or directories to analyze. If a directory is provided, it will be searched recursively (max depth 3).')
         
         # --- GLOBAL OUTPUT FILENAME ---
         parser.add_argument('-ob', '--output_base_name', type=str, default='concentrator_output', 
@@ -1349,24 +1451,15 @@ if __name__ == '__main__':
     else:
         print("⏸️  GPU Acceleration: Manually disabled")
     
-    # --- RECURSIVE FILE COLLECTION LOGIC ---
-    all_filepaths = []
-    print("--- 0. Collecting Rule Files (Recursive Search) ---")
+    # --- RECURSIVE FILE COLLECTION LOGIC (MAX DEPTH 3) ---
+    print("--- 0. Collecting Rule Files (Recursive Search, Max Depth 3) ---")
+    
+    # Use the new recursive search function with depth limit
+    all_filepaths = find_rule_files_recursive(args.paths, max_depth=3)
     
     # Ensure the determined output file is excluded from analysis
     output_files_to_exclude = {os.path.basename(output_file_name)}
-    
-    for path in args.paths:
-        if os.path.isfile(path):
-            if os.path.basename(path) not in output_files_to_exclude:
-                all_filepaths.append(path)
-        elif os.path.isdir(path):
-            print(f"Searching directory: {path} recursively...")
-            for root, _, files in os.walk(path):
-                for file in files:
-                    if file.lower().endswith(('.rule', '.txt', '.lst')) and \
-                       file not in output_files_to_exclude:
-                        all_filepaths.append(os.path.join(root, file))
+    all_filepaths = [fp for fp in all_filepaths if os.path.basename(fp) not in output_files_to_exclude]
 
     if not all_filepaths:
         print("Error: No rule files found to process. Exiting.")
@@ -1511,7 +1604,7 @@ if __name__ == '__main__':
     print("\n" + "="*60)
     print("USAGE MINIMIZER RECOMMENDATIONS")
     print("="*60)
-    print("To optimize your generated rules and reduce file size:")
+    print("To optimize your generated rules and reduce file size you may want to use:")
     print()
     print("* Hashcat's rulefilter:")
     print("   ./minimizer_cl.py rulesPath")
@@ -1522,5 +1615,9 @@ if __name__ == '__main__':
     print("="*60)
     
     if gpu_enabled:
-        print("🎯 GPU Acceleration was used for improved performance")
+        print("🎯 GPU Acceleration was used for improved performance and clean rules output")
+    
+    # Final RAM usage check
+    print_memory_status()
+    
     sys.exit(0)
