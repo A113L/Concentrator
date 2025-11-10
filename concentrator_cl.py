@@ -75,30 +75,30 @@ def print_memory_status():
     """Print current memory status"""
     mem_info = check_ram_usage()
     
-    print(f"📊 Memory Status: RAM {mem_info['ram_percent']:.1f}% ({mem_info['ram_used_gb']:.1f}/{mem_info['ram_total_gb']:.1f} GB)", end="")
+    print(f"Memory Status: RAM {mem_info['ram_percent']:.1f}% ({mem_info['ram_used_gb']:.1f}/{mem_info['ram_total_gb']:.1f} GB)", end="")
     
     if mem_info['swap_total_gb'] > 0:
         if mem_info['using_swap']:
-            print(f" | 💾 SWAP ACTIVE: {mem_info['swap_percent']:.1f}% ({mem_info['swap_used_gb']:.1f}/{mem_info['swap_total_gb']:.1f} GB)")
+            print(f" | SWAP ACTIVE: {mem_info['swap_percent']:.1f}% ({mem_info['swap_used_gb']:.1f}/{mem_info['swap_total_gb']:.1f} GB)")
         else:
-            print(f" | 💾 Swap available: {mem_info['swap_total_gb']:.1f} GB")
+            print(f" | Swap available: {mem_info['swap_total_gb']:.1f} GB")
     else:
-        print(" | 💾 No swap available")
+        print(" | No swap available")
 
 def memory_intensive_operation_warning(operation_name):
     """Warn user about memory-intensive operations and check if they want to continue"""
     mem_info = check_ram_usage()
     
     if mem_info['ram_percent'] > 85:
-        print(f"⚠️  WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%) for {operation_name}")
+        print(f"WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%) for {operation_name}")
         print_memory_status()
         
         if mem_info['swap_total_gb'] == 0:
-            print("🚫 CRITICAL: No swap space available. System may become unstable.")
+            print("CRITICAL: No swap space available. System may become unstable.")
             response = input("Continue with memory-intensive operation? (y/N): ").strip().lower()
             return response in ('y', 'yes')
         else:
-            print("💡 System will use swap space. Performance may be slower.")
+            print("System will use swap space. Performance may be slower.")
             response = input("Continue with memory-intensive operation? (Y/n): ").strip().lower()
             return response not in ('n', 'no')
     
@@ -198,6 +198,84 @@ __kernel void validate_rules_batch(
             valid = false;
             break;
         }
+    }
+    
+    results[rule_idx] = valid ? 1 : 0;
+}
+
+// Enhanced GPU validation with formatted output tracking
+__kernel void validate_and_format_rules(
+    __global const uchar* rules,
+    __global uchar* results,
+    __global uchar* formatted_output,
+    const uint rule_stride,
+    const uint max_rule_len,
+    const uint num_rules,
+    const uint output_stride)
+{
+    uint rule_idx = get_global_id(0);
+    if (rule_idx >= num_rules) return;
+    
+    __global const uchar* rule = rules + rule_idx * rule_stride;
+    __global uchar* output = formatted_output + rule_idx * output_stride;
+    
+    bool valid = true;
+    uint i = 0;
+    uint out_pos = 0;
+    
+    while (i < max_rule_len && rule[i] != 0) {
+        uchar op = rule[i];
+        
+        // Handle positional operators $X and ^X
+        if ((op == '$' || op == '^') && i + 1 < max_rule_len) {
+            uchar digit = rule[i + 1];
+            if (digit >= '0' && digit <= '9') {
+                // Copy both characters for positional operators
+                output[out_pos++] = op;
+                output[out_pos++] = digit;
+                i += 2;
+                continue;
+            }
+        }
+        
+        // Check if operator requires arguments
+        uchar required_args = OPERATORS_REQUIRING_ARGS[op];
+        if (required_args > 0) {
+            if (i + 1 + required_args > max_rule_len) {
+                valid = false;
+                break;
+            }
+            
+            // Copy operator
+            output[out_pos++] = op;
+            
+            // Validate and copy arguments
+            for (uchar arg = 1; arg <= required_args; arg++) {
+                uchar arg_char = rule[i + arg];
+                if (VALID_CHARS[arg_char] == 0) {
+                    valid = false;
+                    break;
+                }
+                output[out_pos++] = arg_char;
+            }
+            
+            if (!valid) break;
+            i += 1 + required_args;
+        } 
+        else if (VALID_CHARS[op] == 1) {
+            // Simple operator - just copy
+            output[out_pos++] = op;
+            i += 1;
+        }
+        else {
+            valid = false;
+            break;
+        }
+    }
+    
+    // Null terminate the formatted output
+    if (out_pos < output_stride) {
+        output[out_pos] = 0;
     }
     
     results[rule_idx] = valid ? 1 : 0;
@@ -313,6 +391,250 @@ __kernel void generate_combinatorial_rules(
 }
 """
 
+OPENCL_RULE_PROCESSING_KERNEL = """
+// Helper function to convert char digit/letter to int position
+unsigned int char_to_pos(unsigned char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+    // Return a value guaranteed to fail bounds checks
+    return 0xFFFFFFFF; 
+}
+
+// Helper function to get rule length
+unsigned int rule_len(__global const unsigned char* rule_ptr, unsigned int max_rule_len) {
+    for (unsigned int i = 0; i < max_rule_len; i++) {
+        if (rule_ptr[i] == 0) return i;
+    }
+    return max_rule_len;
+}
+
+// Parse a complete rule sequence and apply transformations
+void apply_rule_sequence(
+    __global const unsigned char* word_ptr,
+    unsigned int word_len,
+    __global const unsigned char* rule_ptr,
+    unsigned int rule_length,
+    __global unsigned char* result_ptr,
+    unsigned int max_output_len)
+{
+    // Initialize result with original word
+    for(unsigned int i = 0; i < word_len; i++) {
+        result_ptr[i] = word_ptr[i];
+    }
+    unsigned int current_len = word_len;
+    
+    unsigned int rule_pos = 0;
+    while (rule_pos < rule_length) {
+        unsigned char op = rule_ptr[rule_pos];
+        
+        // Handle positional operators $X and ^X
+        if ((op == '$' || op == '^') && rule_pos + 1 < rule_length) {
+            unsigned char digit = rule_ptr[rule_pos + 1];
+            if (digit >= '0' && digit <= '9') {
+                unsigned int pos = char_to_pos(digit);
+                
+                if (op == '$') {
+                    // Append character at position (Hashcat $X)
+                    if (pos < current_len && current_len + 1 < max_output_len) {
+                        result_ptr[current_len] = result_ptr[pos];
+                        current_len++;
+                    }
+                } else { // op == '^'
+                    // Prepend character at position (Hashcat ^X)  
+                    if (pos < current_len && current_len + 1 < max_output_len) {
+                        // Shift right
+                        for (int i = current_len; i > 0; i--) {
+                            result_ptr[i] = result_ptr[i - 1];
+                        }
+                        result_ptr[0] = result_ptr[pos + 1]; // +1 because we shifted
+                        current_len++;
+                    }
+                }
+                rule_pos += 2;
+                continue;
+            }
+        }
+        
+        // Handle operators with arguments
+        if (op == 'i' || op == 'I' || op == 'o' || op == 'O' || 
+            op == 's' || op == 'S' || op == 't' || op == 'T' ||
+            op == 'c' || op == 'C' || op == 'r' || op == 'R' ||
+            op == 'y' || op == 'Y' || op == 'z' || op == 'Z' ||
+            op == 'e' || op == 'E') {
+            
+            if (rule_pos + 2 >= rule_length) break;
+            
+            unsigned char arg1 = rule_ptr[rule_pos + 1];
+            unsigned char arg2 = rule_ptr[rule_pos + 2];
+            
+            // Insert character (iXy)
+            if (op == 'i') {
+                unsigned int pos = char_to_pos(arg1);
+                if (pos <= current_len && current_len + 1 < max_output_len) {
+                    // Shift right from position
+                    for (int i = current_len; i > pos; i--) {
+                        result_ptr[i] = result_ptr[i - 1];
+                    }
+                    result_ptr[pos] = arg2;
+                    current_len++;
+                }
+            }
+            // Overwrite character (oXy)
+            else if (op == 'o') {
+                unsigned int pos = char_to_pos(arg1);
+                if (pos < current_len) {
+                    result_ptr[pos] = arg2;
+                }
+            }
+            // Swap characters (sXy)
+            else if (op == 's') {
+                // Find all occurrences of arg1 and replace with arg2
+                for (unsigned int i = 0; i < current_len; i++) {
+                    if (result_ptr[i] == arg1) {
+                        result_ptr[i] = arg2;
+                    }
+                }
+            }
+            // Swap case (t, T, c, C)
+            else if (op == 't') {
+                // Toggle case of all characters
+                for (unsigned int i = 0; i < current_len; i++) {
+                    unsigned char c = result_ptr[i];
+                    if (c >= 'a' && c <= 'z') {
+                        result_ptr[i] = c - 32;
+                    } else if (c >= 'A' && c <= 'Z') {
+                        result_ptr[i] = c + 32;
+                    }
+                }
+            }
+            else if (op == 'T') {
+                // Toggle case at specific position
+                unsigned int pos = char_to_pos(arg1);
+                if (pos < current_len) {
+                    unsigned char c = result_ptr[pos];
+                    if (c >= 'a' && c <= 'z') {
+                        result_ptr[pos] = c - 32;
+                    } else if (c >= 'A' && c <= 'Z') {
+                        result_ptr[pos] = c + 32;
+                    }
+                }
+            }
+            // Capitalize (c) / lowercase (C)
+            else if (op == 'c') {
+                // Capitalize first character
+                if (current_len > 0 && result_ptr[0] >= 'a' && result_ptr[0] <= 'z') {
+                    result_ptr[0] = result_ptr[0] - 32;
+                }
+            }
+            else if (op == 'C') {
+                // Lowercase first character  
+                if (current_len > 0 && result_ptr[0] >= 'A' && result_ptr[0] <= 'Z') {
+                    result_ptr[0] = result_ptr[0] + 32;
+                }
+            }
+            
+            rule_pos += 3;
+        }
+        // Handle single character operators
+        else {
+            switch (op) {
+                case 'l': // Lowercase all
+                    for (unsigned int i = 0; i < current_len; i++) {
+                        unsigned char c = result_ptr[i];
+                        if (c >= 'A' && c <= 'Z') {
+                            result_ptr[i] = c + 32;
+                        }
+                    }
+                    break;
+                    
+                case 'u': // Uppercase all
+                    for (unsigned int i = 0; i < current_len; i++) {
+                        unsigned char c = result_ptr[i];
+                        if (c >= 'a' && c <= 'z') {
+                            result_ptr[i] = c - 32;
+                        }
+                    }
+                    break;
+                    
+                case 'd': // Duplicate word
+                    if (current_len * 2 < max_output_len) {
+                        for (unsigned int i = 0; i < current_len; i++) {
+                            result_ptr[current_len + i] = result_ptr[i];
+                        }
+                        current_len *= 2;
+                    }
+                    break;
+                    
+                case 'f': // Duplicate and reverse
+                    if (current_len * 2 < max_output_len) {
+                        for (unsigned int i = 0; i < current_len; i++) {
+                            result_ptr[current_len + i] = result_ptr[current_len - 1 - i];
+                        }
+                        current_len *= 2;
+                    }
+                    break;
+                    
+                case 'r': // Reverse entire word
+                    for (unsigned int i = 0; i < current_len / 2; i++) {
+                        unsigned char temp = result_ptr[i];
+                        result_ptr[i] = result_ptr[current_len - 1 - i];
+                        result_ptr[current_len - 1 - i] = temp;
+                    }
+                    break;
+                    
+                case ':': // Do nothing (no-op)
+                    break;
+            }
+            rule_pos++;
+        }
+    }
+    
+    // Null terminate
+    if (current_len < max_output_len) {
+        result_ptr[current_len] = 0;
+    }
+}
+
+__kernel void hashcat_rules_kernel(
+    __global const unsigned char* base_words_in,
+    __global const unsigned char* rules_in,
+    __global unsigned char* result_buffer,
+    const unsigned int num_words,
+    const unsigned int num_rules,
+    const unsigned int max_word_len,
+    const unsigned int max_rule_len,
+    const unsigned int max_output_len)
+{
+    unsigned int global_id = get_global_id(0);
+    unsigned int word_idx = global_id / num_rules;
+    unsigned int rule_idx = global_id % num_rules;
+
+    if (word_idx >= num_words || rule_idx >= num_rules) return;
+
+    // Get word
+    __global const unsigned char* word_ptr = base_words_in + word_idx * max_word_len;
+    unsigned int word_len = 0;
+    for (unsigned int i = 0; i < max_word_len; i++) {
+        if (word_ptr[i] == 0) {
+            word_len = i;
+            break;
+        }
+    }
+    if (word_len == 0) word_len = max_word_len;
+    
+    // Get rule
+    __global const unsigned char* rule_ptr = rules_in + rule_idx * max_rule_len;
+    unsigned int rule_length = rule_len(rule_ptr, max_rule_len);
+    
+    // Get result buffer
+    __global unsigned char* result_ptr = result_buffer + global_id * max_output_len;
+    
+    // Apply the rule sequence
+    apply_rule_sequence(word_ptr, word_len, rule_ptr, rule_length, result_ptr, max_output_len);
+}
+"""
+
 def setup_opencl():
     """Initialize OpenCL context and compile kernels"""
     global _OPENCL_CONTEXT, _OPENCL_QUEUE, _OPENCL_PROGRAM
@@ -388,6 +710,68 @@ def gpu_validate_rules(rules_list, max_rule_length=64):
     except Exception as e:
         print(f"GPU validation failed: {e}, falling back to CPU")
         return [is_valid_hashcat_rule(rule, _OP_REQS, _VALID_CHARS) for rule in rules_list]
+
+def gpu_validate_and_format_rules(rules_list, max_rule_length=64):
+    """Validate rules on GPU and return formatted valid rules"""
+    if not _OPENCL_CONTEXT or not rules_list:
+        return []
+    
+    try:
+        # Prepare data
+        num_rules = len(rules_list)
+        rule_stride = ((max_rule_length + 15) // 16) * 16
+        output_stride = max_rule_length + 1
+        
+        rules_buffer = np.zeros((num_rules, rule_stride), dtype=np.uint8)
+        formatted_output = np.zeros((num_rules, output_stride), dtype=np.uint8)
+        results = np.zeros(num_rules, dtype=np.uint8)
+        
+        # Fill buffer with rules
+        for i, rule in enumerate(rules_list):
+            rule_bytes = rule.encode('ascii', 'ignore')
+            length = min(len(rule_bytes), rule_stride)
+            rules_buffer[i, :length] = np.frombuffer(rule_bytes[:length], dtype=np.uint8)
+        
+        # Create GPU buffers
+        mf = cl.mem_flags
+        rules_gpu = cl.Buffer(_OPENCL_CONTEXT, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=rules_buffer)
+        results_gpu = cl.Buffer(_OPENCL_CONTEXT, mf.WRITE_ONLY, results.nbytes)
+        formatted_gpu = cl.Buffer(_OPENCL_CONTEXT, mf.WRITE_ONLY, formatted_output.nbytes)
+        
+        # Execute enhanced validation kernel
+        global_size = (num_rules,)
+        _OPENCL_PROGRAM.validate_and_format_rules(_OPENCL_QUEUE, global_size, None,
+                                                rules_gpu, results_gpu, formatted_gpu,
+                                                np.uint32(rule_stride),
+                                                np.uint32(max_rule_length),
+                                                np.uint32(num_rules),
+                                                np.uint32(output_stride))
+        
+        # Get results
+        cl.enqueue_copy(_OPENCL_QUEUE, results, results_gpu)
+        cl.enqueue_copy(_OPENCL_QUEUE, formatted_output, formatted_gpu)
+        _OPENCL_QUEUE.finish()
+        
+        # Extract valid formatted rules
+        valid_rules = []
+        for i in range(num_rules):
+            if results[i]:
+                # Extract the formatted rule
+                rule_bytes = formatted_output[i]
+                rule_length = 0
+                for j, byte in enumerate(rule_bytes):
+                    if byte == 0:
+                        rule_length = j
+                        break
+                if rule_length > 0:
+                    rule = ''.join(chr(b) for b in rule_bytes[:rule_length])
+                    valid_rules.append(rule)
+        
+        return valid_rules
+        
+    except Exception as e:
+        print(f"GPU validation with formatting failed: {e}, falling back to CPU")
+        return [rule for rule in rules_list if is_valid_hashcat_rule(rule, _OP_REQS, _VALID_CHARS)]
 
 def gpu_generate_combinatorial_rules(top_operators, min_len, max_len, max_rule_length=64):
     """Generate combinatorial rules on GPU with built-in validation"""
@@ -773,7 +1157,7 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
         return random.choices(choices, weights=weights, k=1)[0]
     
     # Use a maximum number of attempts (e.g., 5 times the target) to prevent infinite loops
-    generation_attempts = target_rules * 5 
+    generation_attempts = target_rules * 5
     
     for attempt in range(generation_attempts):
         # Stop once the target number of unique rules is reached
@@ -986,6 +1370,38 @@ def generate_rules_parallel(top_operators, min_len, max_len):
     
     print(f"Generated and validated {len(generated_rules)} syntactically correct rules.")
     return generated_rules
+
+# --- Enhanced GPU Extraction Mode ---
+def gpu_extract_and_validate_rules(full_rule_counts, top_rules, gpu_enabled):
+    """Extract and validate rules using GPU acceleration"""
+    print(f"\nExtracting top {top_rules} rules with GPU validation...")
+    
+    # Get all rules sorted by frequency
+    all_rules_sorted = sorted(full_rule_counts.items(), key=lambda item: item[1], reverse=True)
+    
+    if gpu_enabled:
+        # Use GPU for validation and formatting
+        rules_to_validate = [rule for rule, count in all_rules_sorted[:top_rules*2]]  # Validate more than needed
+        validated_rules = gpu_validate_and_format_rules(rules_to_validate)
+        
+        # Re-sort validated rules by frequency
+        validated_with_counts = []
+        for rule in validated_rules:
+            if rule in full_rule_counts:
+                validated_with_counts.append((rule, full_rule_counts[rule]))
+        
+        # Sort by frequency and take top N
+        validated_with_counts.sort(key=lambda x: x[1], reverse=True)
+        return validated_with_counts[:top_rules]
+    else:
+        # CPU fallback
+        validated_rules = []
+        for rule, count in all_rules_sorted:
+            if is_valid_hashcat_rule(rule, _OP_REQS, _VALID_CHARS):
+                validated_rules.append((rule, count))
+            if len(validated_rules) >= top_rules:
+                break
+        return validated_rules
 
 # --- Interactive Mode Functions ---
 def get_yes_no(prompt, default=None):
@@ -1247,13 +1663,9 @@ def show_summary(settings, mode_specific, output_file):
         print(f"Rule length range: {mode_specific['min_len']}-{mode_specific['max_len']}")
     
     print(f"Max rule length: {settings['max_length']}")
-    
-    # FIXED: Check for 'no_gpu' instead of 'use_gpu'
     print(f"GPU acceleration: {'No' if settings['no_gpu'] else 'Yes'}")
-    
     print(f"In-memory processing: {'Yes' if settings['in_memory'] else 'No'}")
     
-    # FIXED: Check if cleanup_bin exists in settings
     cleanup_enabled = settings.get('cleanup_bin') is not None
     print(f"Cleanup: {'Yes' if cleanup_enabled else 'No'}")
     
@@ -1267,7 +1679,7 @@ def interactive_mode():
     print("\nThis tool processes Hashcat rules with GPU acceleration and")
     print("advanced generation techniques.")
     print("\nUSAGE MINIMIZER TIP: After generating rules, consider using")
-    print("rulefilter like 'monimizer' or Hashcat's 'cleanup-rules.bin' to remove")
+    print("Hashcat's 'rulefilter' or 'cleanup-rules.bin' to remove")
     print("redundant or ineffective rules, reducing file size and")
     print("improving cracking performance.")
     print("="*60)
@@ -1324,14 +1736,14 @@ if __name__ == '__main__':
     mem_info = check_ram_usage()
     
     if mem_info['ram_percent'] > 85:
-        print(f"⚠️  WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%)")
+        print(f"WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%)")
         if mem_info['swap_total_gb'] == 0:
-            print("🚫 CRITICAL: No swap space available. System may become unstable.")
+            print("CRITICAL: No swap space available. System may become unstable.")
             proceed = get_yes_no("Continue anyway? (y/N): ", default=False)
             if not proceed:
                 sys.exit(1)
         else:
-            print("💡 System will use swap space. Performance may be slower.")
+            print("System will use swap space. Performance may be slower.")
     
     # Check if we should use interactive mode
     if len(sys.argv) == 1:
@@ -1445,11 +1857,11 @@ if __name__ == '__main__':
     if not args.no_gpu:
         gpu_enabled = setup_opencl()
         if gpu_enabled:
-            print("🚀 GPU Acceleration: ENABLED")
+            print("GPU Acceleration: ENABLED")
         else:
-            print("⚠️  GPU Acceleration: Disabled (falling back to CPU)")
+            print("GPU Acceleration: Disabled (falling back to CPU)")
     else:
-        print("⏸️  GPU Acceleration: Manually disabled")
+        print("GPU Acceleration: Manually disabled")
     
     # --- RECURSIVE FILE COLLECTION LOGIC (MAX DEPTH 3) ---
     print("--- 0. Collecting Rule Files (Recursive Search, Max Depth 3) ---")
@@ -1502,9 +1914,9 @@ if __name__ == '__main__':
     # --- EXECUTE ACTIVE MODE ---
     
     if active_mode == 'extraction':
-        # --- Extraction/Statistical Sort and Saving (-e) ---
+        # --- Enhanced GPU Extraction Mode ---
         print("\n" + "~"*50)
-        print("--- 3. Rule Extraction and Saving ---")
+        print("--- 3. GPU-Accelerated Rule Extraction and Validation ---")
         print("~"*50)
         
         if args.statistical_sort:
@@ -1517,13 +1929,32 @@ if __name__ == '__main__':
                 
             print("\n--- Sort Mode: Statistical Sort (Markov Weight) ---")
             sorted_rule_data = get_markov_weighted_rules(full_rule_counts, markov_probabilities, total_transitions)
+            
+            # GPU validate the statistically sorted rules
+            if gpu_enabled and sorted_rule_data:
+                rules_to_validate = [rule for rule, weight in sorted_rule_data[:args.top_rules*2]]
+                validated_rules = gpu_validate_and_format_rules(rules_to_validate)
+                
+                # Re-sort validated rules by statistical weight
+                validated_with_weights = []
+                for rule in validated_rules:
+                    for original_rule, weight in sorted_rule_data:
+                        if rule == original_rule:
+                            validated_with_weights.append((rule, weight))
+                            break
+                
+                top_rules_data = validated_with_weights[:args.top_rules]
+                print(f"GPU validated {len(top_rules_data)} statistically sorted rules")
+            else:
+                top_rules_data = sorted_rule_data[:args.top_rules]
+                
         else:
             mode = 'frequency'
-            print("\n--- Sort Mode: Frequency Sort (Raw Count) ---")
-            sorted_rule_data = sorted(full_rule_counts.items(), key=lambda item: item[1], reverse=True)
+            print("\n--- Sort Mode: Frequency Sort (Raw Count) with GPU Validation ---")
             
-        top_rules_data = sorted_rule_data[:args.top_rules]
-
+            # Use GPU for extraction and validation
+            top_rules_data = gpu_extract_and_validate_rules(full_rule_counts, args.top_rules, gpu_enabled)
+            
         print(f"\nExtracted {len(top_rules_data)} top unique rules (max length: {args.max_length} characters).")
         save_rules_to_file(top_rules_data, output_file_name, mode)
         
@@ -1604,7 +2035,7 @@ if __name__ == '__main__':
     print("\n" + "="*60)
     print("USAGE MINIMIZER RECOMMENDATIONS")
     print("="*60)
-    print("To optimize your generated rules and reduce file size you may want to use:")
+    print("To optimize your generated rules and reduce file size:")
     print()
     print("* Hashcat's rulefilter:")
     print("   ./minimizer_cl.py rulesPath")
@@ -1615,9 +2046,11 @@ if __name__ == '__main__':
     print("="*60)
     
     if gpu_enabled:
-        print("🎯 GPU Acceleration was used for improved performance and clean rules output")
+        print("GPU Acceleration was used for improved performance")
     
     # Final RAM usage check
     print_memory_status()
+    
+    sys.exit(0)
     
     sys.exit(0)
