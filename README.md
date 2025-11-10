@@ -86,9 +86,8 @@ options:
 ```
 https://hcrt.pages.dev/concentrator.static_workflow
 
-============================================================
-USAGE MINIMIZER RECOMMENDATIONS
-============================================================
+**USAGE MINIMIZER RECOMMENDATIONS**
+
 To optimize your generated rules and reduce file size:
 
 * Hashcat's rulefilter:
