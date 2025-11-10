@@ -91,7 +91,8 @@ https://hcrt.pages.dev/concentrator.static_workflow
 To optimize your generated rules and reduce file size:
 
 * Hashcat's rulefilter:
-   ./minimizer_cl.py rulesPath's
+* 
+   ```./minimizer_cl.py rulesPath's```
   
    Filters rules based on various criteria
 
