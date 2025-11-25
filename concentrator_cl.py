@@ -15,12 +15,25 @@ import random
 import numpy as np
 import psutil
 
+# Color codes for terminal output
+class Colors:
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+
 try:
     import pyopencl as cl
     OPENCL_AVAILABLE = True
 except ImportError:
     OPENCL_AVAILABLE = False
-    print("Warning: PyOpenCL not available. Falling back to CPU mode.")
+    print(f"{Colors.YELLOW}Warning: PyOpenCL not available. Falling back to CPU mode.{Colors.END}")
 
 # --- Hashcat Rule Syntax Definitions ---
 ALL_RULE_CHARS = set("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:,.lu.#()=%!?|~+*-^$sStTiIoOcCrRyYzZeEfFxXdDpPbBqQ`[]><@&vV")
@@ -55,6 +68,64 @@ _OPENCL_CONTEXT = None
 _OPENCL_QUEUE = None
 _OPENCL_PROGRAM = None
 
+def print_banner():
+    """Print the colorized program banner"""
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*70)
+    print("          CONCENTRATOR v2.0 - GPU Accelerated Hashcat Rule Processor")
+    print("="*70 + f"{Colors.END}")
+    print(f"{Colors.YELLOW}Features:{Colors.END}")
+    print(f"  {Colors.GREEN}•{Colors.END} OpenCL GPU Acceleration")
+    print(f"  {Colors.GREEN}•{Colors.END} Validated Combinatorial Rule Generation") 
+    print(f"  {Colors.GREEN}•{Colors.END} Statistical (Markov) Rule Generation")
+    print(f"  {Colors.GREEN}•{Colors.END} Parallel File Processing")
+    print(f"  {Colors.GREEN}•{Colors.END} Interactive & CLI Modes")
+    print(f"{Colors.CYAN}{Colors.BOLD}" + "="*70 + f"{Colors.END}\n")
+
+def print_usage():
+    """Print colorized usage information"""
+    print(f"{Colors.BOLD}{Colors.CYAN}USAGE:{Colors.END}")
+    print(f"  {Colors.WHITE}python concentrator.py [OPTIONS] FILE_OR_DIRECTORY [FILE_OR_DIRECTORY...]{Colors.END}")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}MODES (choose one):{Colors.END}")
+    print(f"  {Colors.GREEN}-e, --extract-rules{Colors.END}     Extract top existing rules from input files")
+    print(f"  {Colors.GREEN}-g, --generate-combo{Colors.END}    Generate combinatorial rules from top operators") 
+    print(f"  {Colors.GREEN}-gm, --generate-markov-rules{Colors.END} Generate statistically probable Markov rules")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}EXTRACTION MODE (-e):{Colors.END}")
+    print(f"  {Colors.YELLOW}-t, --top-rules INT{Colors.END}     Number of top rules to extract (default: 10000)")
+    print(f"  {Colors.YELLOW}-s, --statistical-sort{Colors.END}  Sort by statistical weight instead of frequency")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}COMBINATORIAL MODE (-g):{Colors.END}")
+    print(f"  {Colors.YELLOW}-n, --combo-target INT{Colors.END}  Target number of rules (default: 100000)")
+    print(f"  {Colors.YELLOW}-l, --combo-length MIN MAX{Colors.END} Rule length range (default: 1 3)")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}MARKOV MODE (-gm):{Colors.END}")
+    print(f"  {Colors.YELLOW}-gt, --generate-target INT{Colors.END} Target rules (default: 10000)")
+    print(f"  {Colors.YELLOW}-ml, --markov-length MIN MAX{Colors.END} Rule length range (default: 1 3)")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}GLOBAL OPTIONS:{Colors.END}")
+    print(f"  {Colors.MAGENTA}-ob, --output-base-name NAME{Colors.END} Base name for output file")
+    print(f"  {Colors.MAGENTA}-m, --max-length INT{Colors.END}    Maximum rule length to process (default: 31)")
+    print(f"  {Colors.MAGENTA}--temp-dir DIR{Colors.END}        Temporary directory for file mode")
+    print(f"  {Colors.MAGENTA}--in-memory{Colors.END}           Process entirely in RAM")
+    print(f"  {Colors.MAGENTA}--no-gpu{Colors.END}             Disable GPU acceleration")
+    print(f"  {Colors.MAGENTA}-cb, --cleanup-bin PATH{Colors.END} Path to cleanup binary")
+    print(f"  {Colors.MAGENTA}-ca, --cleanup-arg ARG{Colors.END}  Cleanup argument (default: '2')")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}INTERACTIVE MODE:{Colors.END}")
+    print(f"  {Colors.WHITE}python concentrator.py{Colors.END}   (run without arguments for interactive mode)")
+    print()
+    print(f"{Colors.BOLD}{Colors.CYAN}EXAMPLES:{Colors.END}")
+    print(f"  {Colors.WHITE}# Extract top 5000 rules with GPU acceleration{Colors.END}")
+    print(f"  {Colors.WHITE}python concentrator.py -e -t 5000 --no-gpu rules/*.rule{Colors.END}")
+    print()
+    print(f"  {Colors.WHITE}# Generate 50k combinatorial rules{Colors.END}")
+    print(f"  {Colors.WHITE}python concentrator.py -g -n 50000 -l 2 4 hashcat/rules/{Colors.END}")
+    print()
+    print(f"  {Colors.WHITE}# Generate Markov rules with cleanup{Colors.END}")
+    print(f"  {Colors.WHITE}python concentrator.py -gm -gt 10000 -cb ./cleanup-rules.bin rules/{Colors.END}")
+    print()
+
 # --- RAM Usage Monitoring ---
 def check_ram_usage():
     """Check current RAM and swap usage and return status information"""
@@ -72,34 +143,41 @@ def check_ram_usage():
     }
 
 def print_memory_status():
-    """Print current memory status"""
+    """Print current memory status with colors"""
     mem_info = check_ram_usage()
     
-    print(f"Memory Status: RAM {mem_info['ram_percent']:.1f}% ({mem_info['ram_used_gb']:.1f}/{mem_info['ram_total_gb']:.1f} GB)", end="")
+    ram_color = Colors.GREEN
+    if mem_info['ram_percent'] > 85:
+        ram_color = Colors.RED
+    elif mem_info['ram_percent'] > 70:
+        ram_color = Colors.YELLOW
+        
+    print(f"{Colors.CYAN}Memory Status:{Colors.END} {ram_color}RAM {mem_info['ram_percent']:.1f}% ({mem_info['ram_used_gb']:.1f}/{mem_info['ram_total_gb']:.1f} GB){Colors.END}", end="")
     
     if mem_info['swap_total_gb'] > 0:
         if mem_info['using_swap']:
-            print(f" | SWAP ACTIVE: {mem_info['swap_percent']:.1f}% ({mem_info['swap_used_gb']:.1f}/{mem_info['swap_total_gb']:.1f} GB)")
+            swap_color = Colors.YELLOW if mem_info['swap_percent'] < 50 else Colors.RED
+            print(f" | {Colors.CYAN}SWAP:{Colors.END} {swap_color}{mem_info['swap_percent']:.1f}% ({mem_info['swap_used_gb']:.1f}/{mem_info['swap_total_gb']:.1f} GB){Colors.END}")
         else:
-            print(f" | Swap available: {mem_info['swap_total_gb']:.1f} GB")
+            print(f" | {Colors.CYAN}Swap:{Colors.END} {Colors.GREEN}available ({mem_info['swap_total_gb']:.1f} GB){Colors.END}")
     else:
-        print(" | No swap available")
+        print(f" | {Colors.CYAN}Swap:{Colors.END} {Colors.RED}not available{Colors.END}")
 
 def memory_intensive_operation_warning(operation_name):
     """Warn user about memory-intensive operations and check if they want to continue"""
     mem_info = check_ram_usage()
     
     if mem_info['ram_percent'] > 85:
-        print(f"WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%) for {operation_name}")
+        print(f"{Colors.RED}{Colors.BOLD}WARNING:{Colors.END} {Colors.YELLOW}High RAM usage detected ({mem_info['ram_percent']:.1f}%) for {operation_name}{Colors.END}")
         print_memory_status()
         
         if mem_info['swap_total_gb'] == 0:
-            print("CRITICAL: No swap space available. System may become unstable.")
-            response = input("Continue with memory-intensive operation? (y/N): ").strip().lower()
+            print(f"{Colors.RED}CRITICAL: No swap space available. System may become unstable.{Colors.END}")
+            response = input(f"{Colors.YELLOW}Continue with memory-intensive operation? (y/N): {Colors.END}").strip().lower()
             return response in ('y', 'yes')
         else:
-            print("System will use swap space. Performance may be slower.")
-            response = input("Continue with memory-intensive operation? (Y/n): ").strip().lower()
+            print(f"{Colors.YELLOW}System will use swap space. Performance may be slower.{Colors.END}")
+            response = input(f"{Colors.YELLOW}Continue with memory-intensive operation? (Y/n): {Colors.END}").strip().lower()
             return response not in ('n', 'no')
     
     return True
@@ -645,27 +723,27 @@ def setup_opencl():
     try:
         platforms = cl.get_platforms()
         if not platforms:
-            print("No OpenCL platforms found")
+            print(f"{Colors.YELLOW}No OpenCL platforms found{Colors.END}")
             return False
             
         devices = platforms[0].get_devices(cl.device_type.GPU)
         if not devices:
-            print("No GPU devices found, trying CPU")
+            print(f"{Colors.YELLOW}No GPU devices found, trying CPU{Colors.END}")
             devices = platforms[0].get_devices(cl.device_type.CPU)
             
         if not devices:
-            print("No OpenCL devices found")
+            print(f"{Colors.YELLOW}No OpenCL devices found{Colors.END}")
             return False
             
         _OPENCL_CONTEXT = cl.Context(devices)
         _OPENCL_QUEUE = cl.CommandQueue(_OPENCL_CONTEXT)
         _OPENCL_PROGRAM = cl.Program(_OPENCL_CONTEXT, OPENCL_VALIDATION_KERNEL).build()
         
-        print(f"OpenCL initialized on: {devices[0].name}")
+        print(f"{Colors.GREEN}OpenCL initialized on: {devices[0].name}{Colors.END}")
         return True
         
     except Exception as e:
-        print(f"OpenCL initialization failed: {e}")
+        print(f"{Colors.RED}OpenCL initialization failed: {e}{Colors.END}")
         return False
 
 def gpu_validate_rules(rules_list, max_rule_length=64):
@@ -708,7 +786,7 @@ def gpu_validate_rules(rules_list, max_rule_length=64):
         return [bool(result) for result in results]
         
     except Exception as e:
-        print(f"GPU validation failed: {e}, falling back to CPU")
+        print(f"{Colors.RED}GPU validation failed: {e}, falling back to CPU{Colors.END}")
         return [is_valid_hashcat_rule(rule, _OP_REQS, _VALID_CHARS) for rule in rules_list]
 
 def gpu_validate_and_format_rules(rules_list, max_rule_length=64):
@@ -770,7 +848,7 @@ def gpu_validate_and_format_rules(rules_list, max_rule_length=64):
         return valid_rules
         
     except Exception as e:
-        print(f"GPU validation with formatting failed: {e}, falling back to CPU")
+        print(f"{Colors.RED}GPU validation with formatting failed: {e}, falling back to CPU{Colors.END}")
         return [rule for rule in rules_list if is_valid_hashcat_rule(rule, _OP_REQS, _VALID_CHARS)]
 
 def gpu_generate_combinatorial_rules(top_operators, min_len, max_len, max_rule_length=64):
@@ -783,17 +861,17 @@ def gpu_generate_combinatorial_rules(top_operators, min_len, max_len, max_rule_l
         single_char_operators = [op for op in top_operators if len(op) == 1]
         
         if not single_char_operators:
-            print("No single-character operators available for GPU generation, falling back to CPU")
+            print(f"{Colors.YELLOW}No single-character operators available for GPU generation, falling back to CPU{Colors.END}")
             return generate_rules_parallel(top_operators, min_len, max_len)
             
-        print(f"GPU using {len(single_char_operators)} single-character operators (filtered from {len(top_operators)} total)")
+        print(f"{Colors.CYAN}GPU using {len(single_char_operators)} single-character operators (filtered from {len(top_operators)} total){Colors.END}")
         
         # Calculate total combinations
         total_combs = sum(len(single_char_operators) ** l for l in range(min_len, max_len + 1))
         if total_combs == 0:
             return set()
             
-        print(f"GPU generating {total_combs} combinatorial rules...")
+        print(f"{Colors.CYAN}GPU generating {total_combs} combinatorial rules...{Colors.END}")
         
         # Prepare operators array - convert single characters to ASCII codes
         ops_array = np.array([ord(op) for op in single_char_operators], dtype=np.uint8)
@@ -841,11 +919,11 @@ def gpu_generate_combinatorial_rules(top_operators, min_len, max_len, max_rule_l
                     rule = ''.join(chr(b) for b in rule_bytes[:rule_length])
                     valid_rules.add(rule)
         
-        print(f"GPU generated {len(valid_rules)} valid rules")
+        print(f"{Colors.GREEN}GPU generated {len(valid_rules)} valid rules{Colors.END}")
         return valid_rules
         
     except Exception as e:
-        print(f"GPU combinatorial generation failed: {e}, falling back to CPU")
+        print(f"{Colors.RED}GPU combinatorial generation failed: {e}, falling back to CPU{Colors.END}")
         return generate_rules_parallel(top_operators, min_len, max_len)
 
 def set_global_flags(temp_dir_path, in_memory_mode):
@@ -859,12 +937,12 @@ def set_global_flags(temp_dir_path, in_memory_mode):
         if not os.path.isdir(_TEMP_DIR_PATH):
             try:
                 os.makedirs(_TEMP_DIR_PATH, exist_ok=True)
-                print(f"Using temporary directory: {_TEMP_DIR_PATH}")
+                print(f"{Colors.CYAN}Using temporary directory: {_TEMP_DIR_PATH}{Colors.END}")
             except OSError as e:
-                print(f"Warning: Could not create temporary directory at {temp_dir_path}. Falling back to default system temp directory. Error: {e}", flush=True)
+                print(f"{Colors.YELLOW}Warning: Could not create temporary directory at {temp_dir_path}. Falling back to default system temp directory. Error: {e}{Colors.END}", flush=True)
                 _TEMP_DIR_PATH = None
     elif in_memory_mode:
-          print("In-Memory Mode activated. Temporary files will be skipped.")
+          print(f"{Colors.CYAN}In-Memory Mode activated. Temporary files will be skipped.{Colors.END}")
 
 # --- Hashcat Syntax Validation Function ---
 def is_valid_hashcat_rule(rule: str, op_reqs: dict, valid_chars: set) -> bool:
@@ -910,7 +988,7 @@ def find_rule_files_recursive(paths, max_depth=3):
             if path.lower().endswith(('.rule', '.txt', '.lst')):
                 all_filepaths.append(path)
         elif os.path.isdir(path):
-            print(f"Searching directory: {path} (max depth: {max_depth})...")
+            print(f"{Colors.CYAN}Searching directory: {path} (max depth: {max_depth})...{Colors.END}")
             for root, dirs, files in os.walk(path):
                 # Calculate current depth
                 current_depth = root[len(path):].count(os.sep)
@@ -982,15 +1060,15 @@ def process_single_file(filepath, max_rule_length):
             for rule in clean_rules_list:
                 temp_rule_file.write(rule + '\n')
             temp_rule_file.close()  
-            print(f"File analysis complete: {filepath}. Temp rules saved to {temp_rule_filepath}", flush=True)
+            print(f"{Colors.GREEN}File analysis complete: {filepath}. Temp rules saved to {temp_rule_filepath}{Colors.END}", flush=True)
             return operator_counts, full_rule_counts, [], temp_rule_filepath
         else:
             # --- IN-MEMORY MODE: Return the list of rules directly ---
-            print(f"File analysis complete: {filepath}. Rules returned in memory.", flush=True)
+            print(f"{Colors.GREEN}File analysis complete: {filepath}. Rules returned in memory.{Colors.END}", flush=True)
             return operator_counts, full_rule_counts, clean_rules_list, None
             
     except Exception as e:
-        print(f"An error occurred while processing {filepath}: {e}", flush=True)
+        print(f"{Colors.RED}An error occurred while processing {filepath}: {e}{Colors.END}", flush=True)
         if temp_rule_filepath and os.path.exists(temp_rule_filepath):
             os.unlink(temp_rule_filepath)  
         return defaultdict(int), defaultdict(int), [], None
@@ -1008,13 +1086,13 @@ def analyze_rule_files_parallel(filepaths, max_rule_length):
     existing_filepaths = [fp for fp in filepaths if os.path.exists(fp) and os.path.isfile(fp)]
     
     if not existing_filepaths:
-        print("Warning: No valid rule files found to process.")
+        print(f"{Colors.YELLOW}Warning: No valid rule files found to process.{Colors.END}")
         return defaultdict(int), defaultdict(int), [], None
 
     num_processes = min(os.cpu_count() or 1, len(existing_filepaths))
     tasks = [(filepath, max_rule_length) for filepath in existing_filepaths]
     
-    print(f"Starting parallel analysis of {len(existing_filepaths)} files using {num_processes} processes...")
+    print(f"{Colors.CYAN}Starting parallel analysis of {len(existing_filepaths)} files using {num_processes} processes...{Colors.END}")
     with multiprocessing.Pool(processes=num_processes) as pool:
         results = pool.starmap(process_single_file, tasks)
         
@@ -1032,16 +1110,16 @@ def analyze_rule_files_parallel(filepaths, max_rule_length):
                 temp_files_to_merge.append(temp_filepath)
             
     if not _IN_MEMORY_MODE:
-        print("\nMerging temporary rule files into memory for Markov processing...")
+        print(f"\n{Colors.CYAN}Merging temporary rule files into memory for Markov processing...{Colors.END}")
         for temp_filepath in temp_files_to_merge:
             try:
                 with open(temp_filepath, 'r', encoding='utf-8') as f:
                     total_all_clean_rules.extend([line.strip() for line in f])
                 os.unlink(temp_filepath)
             except Exception as e:
-                print(f"Error merging temp file {temp_filepath}: {e}")
+                print(f"{Colors.RED}Error merging temp file {temp_filepath}: {e}{Colors.END}")
             
-    print(f"Total unique rules loaded into memory: {len(total_full_rule_counts)}")
+    print(f"{Colors.GREEN}Total unique rules loaded into memory: {len(total_full_rule_counts)}{Colors.END}")
     
     sorted_op_counts = sorted(total_operator_counts.items(), key=lambda item: item[1], reverse=True)
     return sorted_op_counts, total_full_rule_counts, total_all_clean_rules
@@ -1052,7 +1130,7 @@ def get_markov_model(unique_rules):
     if not memory_intensive_operation_warning("Markov model building"):
         return None, None
         
-    print("\n--- Building Markov Sequence Probability Model ---")
+    print(f"\n{Colors.CYAN}--- Building Markov Sequence Probability Model ---{Colors.END}")
     markov_model_counts = defaultdict(lambda: defaultdict(int))
     START_CHAR = '^'             
     
@@ -1138,7 +1216,7 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
     if not memory_intensive_operation_warning("Markov rule generation"):
         return []
         
-    print(f"\n--- Generating Rules via Markov Model Traversal ({min_len}-{max_len} Operators, Target: {target_rules}) ---")
+    print(f"\n{Colors.CYAN}--- Generating Rules via Markov Model Traversal ({min_len}-{max_len} Operators, Target: {target_rules}) ---{Colors.END}")
     generated_rules = set()
     START_CHAR = '^'
     
@@ -1193,7 +1271,7 @@ def generate_rules_from_markov_model(markov_probabilities, target_rules, min_len
                 if is_valid_hashcat_rule(current_rule, _OP_REQS, _VALID_CHARS):
                     generated_rules.add(current_rule)
 
-    print(f"Generated {len(generated_rules)} statistically probable and syntactically valid rules (Target: {target_rules}).")
+    print(f"{Colors.GREEN}Generated {len(generated_rules)} statistically probable and syntactically valid rules (Target: {target_rules}).{Colors.END}")
     
     # Calculate weights for the generated rules for final sorting
     if generated_rules:
@@ -1241,21 +1319,21 @@ def save_rules_to_file(rules_data, filename, mode):
         rules_to_save = sorted(list(rules_data))
         header = f"# Rules saved: {len(rules_to_save)} total.\n"
             
-    print(f"\nSaving {len(rules_to_save)} rules to file '{filename}'...")
+    print(f"\n{Colors.CYAN}Saving {len(rules_to_save)} rules to file '{filename}'...{Colors.END}")
     with open(filename, 'w', encoding='utf-8') as f:
         f.write(header)
         for rule in rules_to_save:
             f.write(f"{rule}\n")
             
-    print(f"File '{filename}' saved.")
+    print(f"{Colors.GREEN}File '{filename}' saved.{Colors.END}")
     sys.stdout.flush()
 
 def run_and_rename_cleanup(input_file, command_binary, command_arg):
     RULE_TO_ADD = ":\n"
     temp_output_file = "temp_cleanup.rule"
     
-    print(f"\n--- Starting External Cleanup Process ---")
-    print(f"Running command: {command_binary} {command_arg} on {input_file}")
+    print(f"\n{Colors.CYAN}--- Starting External Cleanup Process ---{Colors.END}")
+    print(f"{Colors.CYAN}Running command: {command_binary} {command_arg} on {input_file}{Colors.END}")
 
     try:
         with open(input_file, 'r') as infile:
@@ -1266,42 +1344,42 @@ def run_and_rename_cleanup(input_file, command_binary, command_arg):
                     stdout=outfile,
                     check=True  
                 )
-        print("Cleanup command finished successfully.")
+        print(f"{Colors.GREEN}Cleanup command finished successfully.{Colors.END}")
 
     except FileNotFoundError:
-        print(f"CLEANUP ERROR: Binary file not found: {command_binary}. Skipping cleanup.")
+        print(f"{Colors.RED}CLEANUP ERROR: Binary file not found: {command_binary}. Skipping cleanup.{Colors.END}")
         return False
     except subprocess.CalledProcessError as e:
-        print(f"CLEANUP ERROR: Command returned non-zero exit code: {e.returncode}. Skipping cleanup.")
+        print(f"{Colors.RED}CLEANUP ERROR: Command returned non-zero exit code: {e.returncode}. Skipping cleanup.{Colors.END}")
         if os.path.exists(temp_output_file): os.remove(temp_output_file)
         return False
     except Exception as e:
-        print(f"CLEANUP ERROR: An unknown error occurred: {e}. Skipping cleanup.")
+        print(f"{Colors.RED}CLEANUP ERROR: An unknown error occurred: {e}. Skipping cleanup.{Colors.END}")
         if os.path.exists(temp_output_file): os.remove(temp_output_file)
         return False
         
     try:
-        print(f"Adding rule ':' to the start of {temp_output_file}...")
+        print(f"{Colors.CYAN}Adding rule ':' to the start of {temp_output_file}...{Colors.END}")
         with open(temp_output_file, 'r') as f:
             content = f.read()
 
         with open(temp_output_file, 'w') as f:
             f.write(RULE_TO_ADD)
             f.write(content)
-        print("Rule added successfully.")
+        print(f"{Colors.GREEN}Rule added successfully.{Colors.END}")
 
     except Exception as e:
-        print(f"CLEANUP ERROR: Failed to modify file {temp_output_file}: {e}. Skipping rename.")
+        print(f"{Colors.RED}CLEANUP ERROR: Failed to modify file {temp_output_file}: {e}. Skipping rename.{Colors.END}")
         return False
         
     line_count = 0
     try:
         with open(temp_output_file, 'r') as f:
             line_count = sum(1 for _ in f)
-        print(f"Final rule count after cleanup (including ':' rule): {line_count} lines.")
+        print(f"{Colors.CYAN}Final rule count after cleanup (including ':' rule): {line_count} lines.{Colors.END}")
 
     except Exception as e:
-        print(f"CLEANUP ERROR: Failed to count lines: {e}. Skipping rename.")
+        print(f"{Colors.RED}CLEANUP ERROR: Failed to count lines: {e}. Skipping rename.{Colors.END}")
         line_count = 'ERR'
 
     original_base = os.path.splitext(input_file)[0]
@@ -1309,16 +1387,16 @@ def run_and_rename_cleanup(input_file, command_binary, command_arg):
     
     try:
         os.rename(temp_output_file, new_filename)
-        print(f"Successfully renamed cleanup output to '{new_filename}'.")
+        print(f"{Colors.GREEN}Successfully renamed cleanup output to '{new_filename}'.{Colors.END}")
         try:
             os.remove(input_file)
-            print(f"Original file '{input_file}' deleted.")
+            print(f"{Colors.CYAN}Original file '{input_file}' deleted.{Colors.END}")
         except OSError:
-            print(f"Warning: Could not delete original file '{input_file}'.")
+            print(f"{Colors.YELLOW}Warning: Could not delete original file '{input_file}'.{Colors.END}")
 
         return True
     except OSError as e:
-        print(f"CLEANUP ERROR: Failed to rename file: {e}")
+        print(f"{Colors.RED}CLEANUP ERROR: Failed to rename file: {e}{Colors.END}")
         return False
     
 # --- Combinatorial Generation Functions ---
@@ -1361,20 +1439,20 @@ def generate_rules_parallel(top_operators, min_len, max_len):
     tasks = [(top_operators, length, _OP_REQS, _VALID_CHARS) for length in all_lengths]
     
     num_processes = min(os.cpu_count() or 1, len(all_lengths))
-    print(f"Generating new VALID rules of length {min_len} to {max_len} using {len(top_operators)} operators across {num_processes} processes...")
+    print(f"{Colors.CYAN}Generating new VALID rules of length {min_len} to {max_len} using {len(top_operators)} operators across {num_processes} processes...{Colors.END}")
     
     with multiprocessing.Pool(processes=num_processes) as pool:
         results = pool.map(generate_rules_for_length_validated, tasks)
         
     generated_rules = set().union(*results)
     
-    print(f"Generated and validated {len(generated_rules)} syntactically correct rules.")
+    print(f"{Colors.GREEN}Generated and validated {len(generated_rules)} syntactically correct rules.{Colors.END}")
     return generated_rules
 
 # --- Enhanced GPU Extraction Mode ---
 def gpu_extract_and_validate_rules(full_rule_counts, top_rules, gpu_enabled):
     """Extract and validate rules using GPU acceleration"""
-    print(f"\nExtracting top {top_rules} rules with GPU validation...")
+    print(f"\n{Colors.CYAN}Extracting top {top_rules} rules with GPU validation...{Colors.END}")
     
     # Get all rules sorted by frequency
     all_rules_sorted = sorted(full_rule_counts.items(), key=lambda item: item[1], reverse=True)
@@ -1415,7 +1493,7 @@ def get_yes_no(prompt, default=None):
         elif response == '' and default is not None:
             return default
         else:
-            print("Please enter 'y' or 'n'")
+            print(f"{Colors.YELLOW}Please enter 'y' or 'n'{Colors.END}")
 
 def get_integer(prompt, default=None, min_val=None, max_val=None):
     """Get integer input from user with validation"""
@@ -1426,102 +1504,102 @@ def get_integer(prompt, default=None, min_val=None, max_val=None):
                 return default
             value = int(response)
             if min_val is not None and value < min_val:
-                print(f"Value must be at least {min_val}")
+                print(f"{Colors.YELLOW}Value must be at least {min_val}{Colors.END}")
                 continue
             if max_val is not None and value > max_val:
-                print(f"Value must be at most {max_val}")
+                print(f"{Colors.YELLOW}Value must be at most {max_val}{Colors.END}")
                 continue
             return value
         except ValueError:
-            print("Please enter a valid number")
+            print(f"{Colors.YELLOW}Please enter a valid number{Colors.END}")
 
 def get_file_paths_interactive():
     """Get file paths interactively from user"""
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("RULE FILE SELECTION")
-    print("="*60)
+    print("="*60 + f"{Colors.END}")
     
     paths = []
     while True:
-        print("\nCurrent files/folders to process:")
+        print(f"\n{Colors.CYAN}Current files/folders to process:{Colors.END}")
         for i, path in enumerate(paths, 1):
-            print(f"  {i}. {path}")
+            print(f"  {Colors.WHITE}{i}. {path}{Colors.END}")
         
-        print("\nOptions:")
-        print("  1. Add a file")
-        print("  2. Add a folder (recursive search, max depth 3)")
-        print("  3. Remove a file/folder")
-        print("  4. Start processing")
+        print(f"\n{Colors.CYAN}Options:{Colors.END}")
+        print(f"  {Colors.GREEN}1.{Colors.END} Add a file")
+        print(f"  {Colors.GREEN}2.{Colors.END} Add a folder (recursive search, max depth 3)")
+        print(f"  {Colors.GREEN}3.{Colors.END} Remove a file/folder")
+        print(f"  {Colors.GREEN}4.{Colors.END} Start processing")
         
-        choice = input("\nEnter your choice (1-4): ").strip()
+        choice = input(f"\n{Colors.YELLOW}Enter your choice (1-4): {Colors.END}").strip()
         
         if choice == '1':
-            file_path = input("Enter file path: ").strip()
+            file_path = input(f"{Colors.CYAN}Enter file path: {Colors.END}").strip()
             if os.path.isfile(file_path):
                 if file_path not in paths:
                     paths.append(file_path)
-                    print(f"Added: {file_path}")
+                    print(f"{Colors.GREEN}Added: {file_path}{Colors.END}")
                 else:
-                    print("File already in list")
+                    print(f"{Colors.YELLOW}File already in list{Colors.END}")
             else:
-                print("File not found or not a file")
+                print(f"{Colors.RED}File not found or not a file{Colors.END}")
                 
         elif choice == '2':
-            folder_path = input("Enter folder path: ").strip()
+            folder_path = input(f"{Colors.CYAN}Enter folder path: {Colors.END}").strip()
             if os.path.isdir(folder_path):
                 if folder_path not in paths:
                     paths.append(folder_path)
-                    print(f"Added: {folder_path} (will search recursively, max depth 3)")
+                    print(f"{Colors.GREEN}Added: {folder_path} (will search recursively, max depth 3){Colors.END}")
                 else:
-                    print("Folder already in list")
+                    print(f"{Colors.YELLOW}Folder already in list{Colors.END}")
             else:
-                print("Folder not found or not a directory")
+                print(f"{Colors.RED}Folder not found or not a directory{Colors.END}")
                 
         elif choice == '3':
             if not paths:
-                print("No files to remove")
+                print(f"{Colors.YELLOW}No files to remove{Colors.END}")
                 continue
             try:
-                index = int(input(f"Enter number to remove (1-{len(paths)}): ")) - 1
+                index = int(input(f"{Colors.CYAN}Enter number to remove (1-{len(paths)}): {Colors.END}")) - 1
                 if 0 <= index < len(paths):
                     removed = paths.pop(index)
-                    print(f"Removed: {removed}")
+                    print(f"{Colors.GREEN}Removed: {removed}{Colors.END}")
                 else:
-                    print("Invalid number")
+                    print(f"{Colors.RED}Invalid number{Colors.END}")
             except ValueError:
-                print("Please enter a valid number")
+                print(f"{Colors.RED}Please enter a valid number{Colors.END}")
                 
         elif choice == '4':
             if not paths:
-                print("Please add at least one file or folder first")
+                print(f"{Colors.RED}Please add at least one file or folder first{Colors.END}")
                 continue
             break
         else:
-            print("Invalid choice")
+            print(f"{Colors.RED}Invalid choice{Colors.END}")
     
     return paths
 
 def get_processing_mode_interactive():
     """Get processing mode from user"""
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("PROCESSING MODE SELECTION")
-    print("="*60)
-    print("\nAvailable modes:")
-    print("  1. Extract Rules (-e)")
-    print("     - Extract top existing rules from input files")
-    print("     - Can sort by frequency or statistical weight")
+    print("="*60 + f"{Colors.END}")
+    print(f"\n{Colors.CYAN}Available modes:{Colors.END}")
+    print(f"  {Colors.GREEN}1.{Colors.END} Extract Rules (-e)")
+    print(f"     {Colors.WHITE}- Extract top existing rules from input files{Colors.END}")
+    print(f"     {Colors.WHITE}- Can sort by frequency or statistical weight{Colors.END}")
     print()
-    print("  2. Generate Combinatorial Rules (-g)")
-    print("     - Generate new rules by combining top operators")
-    print("     - Creates all valid combinations within length range")
+    print(f"  {Colors.GREEN}2.{Colors.END} Generate Combinatorial Rules (-g)")
+    print(f"     {Colors.WHITE}- Generate new rules by combining top operators{Colors.END}")
+    print(f"     {Colors.WHITE}- Creates all valid combinations within length range{Colors.END}")
     print()
-    print("  3. Generate Markov Rules (-gm)")
-    print("     - Generate statistically probable rules using Markov model")
-    print("     - Creates rules that follow patterns from input data")
+    print(f"  {Colors.GREEN}3.{Colors.END} Generate Markov Rules (-gm)")
+    print(f"     {Colors.WHITE}- Generate statistically probable rules using Markov model{Colors.END}")
+    print(f"     {Colors.WHITE}- Creates rules that follow patterns from input data{Colors.END}")
     print()
     
     while True:
-        choice = input("Select mode (1-3): ").strip()
+        choice = input(f"{Colors.YELLOW}Select mode (1-3): {Colors.END}").strip()
         if choice == '1':
             return 'extraction'
         elif choice == '2':
@@ -1529,13 +1607,13 @@ def get_processing_mode_interactive():
         elif choice == '3':
             return 'markov'
         else:
-            print("Please enter 1, 2, or 3")
+            print(f"{Colors.RED}Please enter 1, 2, or 3{Colors.END}")
 
 def get_extraction_settings():
     """Get settings for extraction mode"""
-    print("\n--- Extraction Settings ---")
-    top_rules = get_integer("Number of top rules to extract (default 10000): ", default=10000, min_val=1)
-    statistical_sort = get_yes_no("Use statistical sort instead of frequency? (y/N): ", default=False)
+    print(f"\n{Colors.CYAN}--- Extraction Settings ---{Colors.END}")
+    top_rules = get_integer(f"{Colors.YELLOW}Number of top rules to extract (default 10000): {Colors.END}", default=10000, min_val=1)
+    statistical_sort = get_yes_no(f"{Colors.YELLOW}Use statistical sort instead of frequency? (y/N): {Colors.END}", default=False)
     
     return {
         'top_rules': top_rules,
@@ -1544,12 +1622,12 @@ def get_extraction_settings():
 
 def get_combo_settings():
     """Get settings for combinatorial generation mode"""
-    print("\n--- Combinatorial Generation Settings ---")
-    target_rules = get_integer("Target number of rules to generate (default 100000): ", default=100000, min_val=1)
+    print(f"\n{Colors.CYAN}--- Combinatorial Generation Settings ---{Colors.END}")
+    target_rules = get_integer(f"{Colors.YELLOW}Target number of rules to generate (default 100000): {Colors.END}", default=100000, min_val=1)
     
-    print("\nRule length range:")
-    min_len = get_integer("Minimum rule length (default 1): ", default=1, min_val=1)
-    max_len = get_integer("Maximum rule length (default 3): ", default=3, min_val=min_len)
+    print(f"\n{Colors.CYAN}Rule length range:{Colors.END}")
+    min_len = get_integer(f"{Colors.YELLOW}Minimum rule length (default 1): {Colors.END}", default=1, min_val=1)
+    max_len = get_integer(f"{Colors.YELLOW}Maximum rule length (default 3): {Colors.END}", default=3, min_val=min_len)
     
     return {
         'target_rules': target_rules,
@@ -1559,12 +1637,12 @@ def get_combo_settings():
 
 def get_markov_settings():
     """Get settings for Markov generation mode"""
-    print("\n--- Markov Generation Settings ---")
-    target_rules = get_integer("Target number of rules to generate (default 10000): ", default=10000, min_val=1)
+    print(f"\n{Colors.CYAN}--- Markov Generation Settings ---{Colors.END}")
+    target_rules = get_integer(f"{Colors.YELLOW}Target number of rules to generate (default 10000): {Colors.END}", default=10000, min_val=1)
     
-    print("\nRule length range:")
-    min_len = get_integer("Minimum rule length (default 1): ", default=1, min_val=1)
-    max_len = get_integer("Maximum rule length (default 3): ", default=3, min_val=min_len)
+    print(f"\n{Colors.CYAN}Rule length range:{Colors.END}")
+    min_len = get_integer(f"{Colors.YELLOW}Minimum rule length (default 1): {Colors.END}", default=1, min_val=1)
+    max_len = get_integer(f"{Colors.YELLOW}Maximum rule length (default 3): {Colors.END}", default=3, min_val=min_len)
     
     return {
         'target_rules': target_rules,
@@ -1574,33 +1652,33 @@ def get_markov_settings():
 
 def get_advanced_settings():
     """Get advanced settings from user"""
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("ADVANCED SETTINGS")
-    print("="*60)
+    print("="*60 + f"{Colors.END}")
     
     settings = {}
     
-    settings['max_length'] = get_integer("Maximum rule length to process (default 31): ", default=31, min_val=1)
+    settings['max_length'] = get_integer(f"{Colors.YELLOW}Maximum rule length to process (default 31): {Colors.END}", default=31, min_val=1)
     
-    settings['no_gpu'] = not get_yes_no("Use GPU acceleration if available? (Y/n): ", default=True)
+    settings['no_gpu'] = not get_yes_no(f"{Colors.YELLOW}Use GPU acceleration if available? (Y/n): {Colors.END}", default=True)
     
-    settings['in_memory'] = get_yes_no("Process entirely in RAM? (y/N): ", default=False)
+    settings['in_memory'] = get_yes_no(f"{Colors.YELLOW}Process entirely in RAM? (y/N): {Colors.END}", default=False)
     
     if not settings['in_memory']:
-        temp_dir = input("Temporary directory path (Enter for system default): ").strip()
+        temp_dir = input(f"{Colors.YELLOW}Temporary directory path (Enter for system default): {Colors.END}").strip()
         settings['temp_dir'] = temp_dir if temp_dir else None
     else:
         settings['temp_dir'] = None
     
     # Cleanup settings
-    use_cleanup = get_yes_no("Run cleanup after processing? (y/N): ", default=False)
+    use_cleanup = get_yes_no(f"{Colors.YELLOW}Run cleanup after processing? (y/N): {Colors.END}", default=False)
     if use_cleanup:
-        cleanup_bin = input("Path to cleanup binary: ").strip()
+        cleanup_bin = input(f"{Colors.YELLOW}Path to cleanup binary: {Colors.END}").strip()
         if cleanup_bin and os.path.isfile(cleanup_bin):
             settings['cleanup_bin'] = cleanup_bin
-            settings['cleanup_arg'] = input("Cleanup argument (default '2'): ").strip() or '2'
+            settings['cleanup_arg'] = input(f"{Colors.YELLOW}Cleanup argument (default '2'): {Colors.END}").strip() or '2'
         else:
-            print("Cleanup binary not found, disabling cleanup")
+            print(f"{Colors.RED}Cleanup binary not found, disabling cleanup{Colors.END}")
             settings['cleanup_bin'] = None
     else:
         settings['cleanup_bin'] = None
@@ -1609,9 +1687,9 @@ def get_advanced_settings():
 
 def get_output_filename_interactive(mode):
     """Get output filename from user"""
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("OUTPUT SETTINGS")
-    print("="*60)
+    print("="*60 + f"{Colors.END}")
     
     default_names = {
         'extraction': 'concentrator_extracted',
@@ -1622,7 +1700,7 @@ def get_output_filename_interactive(mode):
     default_name = default_names.get(mode, 'concentrator_output')
     
     while True:
-        base_name = input(f"Output base filename (default '{default_name}'): ").strip()
+        base_name = input(f"{Colors.YELLOW}Output base filename (default '{default_name}'): {Colors.END}").strip()
         if not base_name:
             base_name = default_name
         
@@ -1636,7 +1714,7 @@ def get_output_filename_interactive(mode):
         output_file = base_name + suffixes.get(mode, '.txt')
         
         if os.path.exists(output_file):
-            overwrite = get_yes_no(f"File '{output_file}' already exists. Overwrite? (y/N): ", default=False)
+            overwrite = get_yes_no(f"{Colors.YELLOW}File '{output_file}' already exists. Overwrite? (y/N): {Colors.END}", default=False)
             if not overwrite:
                 continue
         
@@ -1644,45 +1722,45 @@ def get_output_filename_interactive(mode):
 
 def show_summary(settings, mode_specific, output_file):
     """Show summary of selected options"""
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("PROCESSING SUMMARY")
-    print("="*60)
+    print("="*60 + f"{Colors.END}")
     
-    print(f"Mode: {mode_specific['mode'].upper()}")
-    print(f"Output file: {output_file}")
-    print(f"Files/folders to process: {len(settings['paths'])}")
+    print(f"{Colors.CYAN}Mode:{Colors.END} {Colors.WHITE}{mode_specific['mode'].upper()}{Colors.END}")
+    print(f"{Colors.CYAN}Output file:{Colors.END} {Colors.WHITE}{output_file}{Colors.END}")
+    print(f"{Colors.CYAN}Files/folders to process:{Colors.END} {Colors.WHITE}{len(settings['paths'])}{Colors.END}")
     
     if mode_specific['mode'] == 'extraction':
-        print(f"Top rules to extract: {mode_specific['top_rules']}")
-        print(f"Sort method: {'Statistical' if mode_specific['statistical_sort'] else 'Frequency'}")
+        print(f"{Colors.CYAN}Top rules to extract:{Colors.END} {Colors.WHITE}{mode_specific['top_rules']}{Colors.END}")
+        print(f"{Colors.CYAN}Sort method:{Colors.END} {Colors.WHITE}{'Statistical' if mode_specific['statistical_sort'] else 'Frequency'}{Colors.END}")
     elif mode_specific['mode'] == 'combo':
-        print(f"Target rules: {mode_specific['target_rules']}")
-        print(f"Rule length range: {mode_specific['min_len']}-{mode_specific['max_len']}")
+        print(f"{Colors.CYAN}Target rules:{Colors.END} {Colors.WHITE}{mode_specific['target_rules']}{Colors.END}")
+        print(f"{Colors.CYAN}Rule length range:{Colors.END} {Colors.WHITE}{mode_specific['min_len']}-{mode_specific['max_len']}{Colors.END}")
     elif mode_specific['mode'] == 'markov':
-        print(f"Target rules: {mode_specific['target_rules']}")
-        print(f"Rule length range: {mode_specific['min_len']}-{mode_specific['max_len']}")
+        print(f"{Colors.CYAN}Target rules:{Colors.END} {Colors.WHITE}{mode_specific['target_rules']}{Colors.END}")
+        print(f"{Colors.CYAN}Rule length range:{Colors.END} {Colors.WHITE}{mode_specific['min_len']}-{mode_specific['max_len']}{Colors.END}")
     
-    print(f"Max rule length: {settings['max_length']}")
-    print(f"GPU acceleration: {'No' if settings['no_gpu'] else 'Yes'}")
-    print(f"In-memory processing: {'Yes' if settings['in_memory'] else 'No'}")
+    print(f"{Colors.CYAN}Max rule length:{Colors.END} {Colors.WHITE}{settings['max_length']}{Colors.END}")
+    print(f"{Colors.CYAN}GPU acceleration:{Colors.END} {Colors.WHITE}{'No' if settings['no_gpu'] else 'Yes'}{Colors.END}")
+    print(f"{Colors.CYAN}In-memory processing:{Colors.END} {Colors.WHITE}{'Yes' if settings['in_memory'] else 'No'}{Colors.END}")
     
     cleanup_enabled = settings.get('cleanup_bin') is not None
-    print(f"Cleanup: {'Yes' if cleanup_enabled else 'No'}")
+    print(f"{Colors.CYAN}Cleanup:{Colors.END} {Colors.WHITE}{'Yes' if cleanup_enabled else 'No'}{Colors.END}")
     
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60 + f"{Colors.END}")
 
 def interactive_mode():
     """Main interactive mode function"""
-    print("\n" + "="*60)
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("CONCENTRATOR v2.0 - Interactive Mode")
-    print("="*60)
-    print("\nThis tool processes Hashcat rules with GPU acceleration and")
-    print("advanced generation techniques.")
-    print("\nUSAGE MINIMIZER TIP: After generating rules, consider using")
-    print("Hashcat's 'rulefilter' or 'cleanup-rules.bin' to remove")
-    print("redundant or ineffective rules, reducing file size and")
-    print("improving cracking performance.")
-    print("="*60)
+    print("="*60 + f"{Colors.END}")
+    print(f"\n{Colors.YELLOW}This tool processes Hashcat rules with GPU acceleration and")
+    print(f"advanced generation techniques.{Colors.END}")
+    print(f"\n{Colors.CYAN}USAGE MINIMIZER TIP:{Colors.END} {Colors.WHITE}After generating rules, consider using")
+    print(f"Hashcat's 'rulefilter' or 'cleanup-rules.bin' to remove")
+    print(f"redundant or ineffective rules, reducing file size and")
+    print(f"improving cracking performance.{Colors.END}")
+    print(f"{Colors.CYAN}{Colors.BOLD}" + "="*60 + f"{Colors.END}")
     
     # Collect all settings interactively
     paths = get_file_paths_interactive()
@@ -1721,8 +1799,8 @@ def interactive_mode():
     # Show summary and confirm
     show_summary(settings, mode_specific, output_file)
     
-    if not get_yes_no("\nStart processing? (Y/n): ", default=True):
-        print("Processing cancelled.")
+    if not get_yes_no(f"\n{Colors.YELLOW}Start processing? (Y/n): {Colors.END}", default=True):
+        print(f"{Colors.YELLOW}Processing cancelled.{Colors.END}")
         return None
     
     return settings
@@ -1731,21 +1809,24 @@ def interactive_mode():
 if __name__ == '__main__':
     multiprocessing.freeze_support()  
     
+    # Print banner
+    print_banner()
+    
     # Check RAM usage at startup
     print_memory_status()
     mem_info = check_ram_usage()
     
     if mem_info['ram_percent'] > 85:
-        print(f"WARNING: High RAM usage detected ({mem_info['ram_percent']:.1f}%)")
+        print(f"{Colors.RED}{Colors.BOLD}WARNING:{Colors.END} {Colors.YELLOW}High RAM usage detected ({mem_info['ram_percent']:.1f}%){Colors.END}")
         if mem_info['swap_total_gb'] == 0:
-            print("CRITICAL: No swap space available. System may become unstable.")
-            proceed = get_yes_no("Continue anyway? (y/N): ", default=False)
+            print(f"{Colors.RED}CRITICAL: No swap space available. System may become unstable.{Colors.END}")
+            proceed = get_yes_no(f"{Colors.YELLOW}Continue anyway? (y/N): {Colors.END}", default=False)
             if not proceed:
                 sys.exit(1)
         else:
-            print("System will use swap space. Performance may be slower.")
+            print(f"{Colors.YELLOW}System will use swap space. Performance may be slower.{Colors.END}")
     
-    # Check if we should use interactive mode
+    # Check if we should use interactive mode or show help
     if len(sys.argv) == 1:
         # Interactive mode
         settings = interactive_mode()
@@ -1782,15 +1863,32 @@ if __name__ == '__main__':
         
         args = Args(settings)
         
+    elif len(sys.argv) == 2 and sys.argv[1] in ['-h', '--help']:
+        # Show colorized help
+        print_usage()
+        sys.exit(0)
     else:
         # CLI mode (for backward compatibility)
-        parser = argparse.ArgumentParser(description='GPU Accelerated Hashcat Rule Processor with OpenCL support. Extracts top N rules, generates VALID combinatorial/Markov rules. Requires exactly one mode (-e, -g, or -gm). Supports recursive folder search (max depth 3).')
+        parser = argparse.ArgumentParser(
+            description=f'{Colors.CYAN}GPU Accelerated Hashcat Rule Processor with OpenCL support.{Colors.END}',
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=f"""{Colors.CYAN}Examples:{Colors.END}
+  {Colors.WHITE}# Extract top rules{Colors.END}
+  python concentrator.py -e -t 5000 rules/*.rule
+
+  {Colors.WHITE}# Generate combinatorial rules{Colors.END}  
+  python concentrator.py -g -n 50000 -l 2 4 hashcat/rules/
+
+  {Colors.WHITE}# Run interactive mode{Colors.END}
+  python concentrator.py
+"""
+        )
         
-        parser.add_argument('paths', nargs='+', help='Paths to rule files or directories to analyze. If a directory is provided, it will be searched recursively (max depth 3).')
+        parser.add_argument('paths', nargs='+', help='Paths to rule files or directories to analyze recursively (max depth 3)')
         
         # --- GLOBAL OUTPUT FILENAME ---
         parser.add_argument('-ob', '--output_base_name', type=str, default='concentrator_output', 
-                            help='The base name for the output file. The script will append a suffix based on the mode (e.g., "_extracted.txt", "_combo.txt", "_markov.txt").')
+                            help='The base name for the output file. The script will append a suffix based on the mode.')
         
         # --- MONO MODE ENFORCEMENT GROUP (The Three Modes) ---
         output_group = parser.add_mutually_exclusive_group(required=True)
@@ -1828,21 +1926,24 @@ if __name__ == '__main__':
     if hasattr(args, 'markov_length') and args.markov_length is None:
         args.markov_length = [1, 3]
     
-    # Determine active mode and output filename
+    # Determine active mode and output filename with colors
     if args.extract_rules:
         active_mode = 'extraction'
         output_suffix = '_extracted.txt'
+        mode_color = Colors.GREEN
     elif args.generate_combo:
         active_mode = 'combo'
         output_suffix = '_combo.txt'
+        mode_color = Colors.BLUE
     elif args.generate_markov_rules:
         active_mode = 'markov'
         output_suffix = '_markov.txt'
+        mode_color = Colors.MAGENTA
         
     output_file_name = args.output_base_name + output_suffix
     
-    print(f"\nActive Mode: **{active_mode.upper()}**")
-    print(f"Output File Name: **{output_file_name}**")
+    print(f"\n{Colors.CYAN}Active Mode:{Colors.END} {mode_color}{Colors.BOLD}{active_mode.upper()}{Colors.END}")
+    print(f"{Colors.CYAN}Output File:{Colors.END} {Colors.WHITE}{output_file_name}{Colors.END}")
     
     # Set length defaults
     if active_mode == 'markov':
@@ -1857,14 +1958,14 @@ if __name__ == '__main__':
     if not args.no_gpu:
         gpu_enabled = setup_opencl()
         if gpu_enabled:
-            print("GPU Acceleration: ENABLED")
+            print(f"{Colors.GREEN}GPU Acceleration: ENABLED{Colors.END}")
         else:
-            print("GPU Acceleration: Disabled (falling back to CPU)")
+            print(f"{Colors.YELLOW}GPU Acceleration: Disabled (falling back to CPU){Colors.END}")
     else:
-        print("GPU Acceleration: Manually disabled")
+        print(f"{Colors.YELLOW}GPU Acceleration: Manually disabled{Colors.END}")
     
     # --- RECURSIVE FILE COLLECTION LOGIC (MAX DEPTH 3) ---
-    print("--- 0. Collecting Rule Files (Recursive Search, Max Depth 3) ---")
+    print(f"{Colors.CYAN}--- 0. Collecting Rule Files (Recursive Search, Max Depth 3) ---{Colors.END}")
     
     # Use the new recursive search function with depth limit
     all_filepaths = find_rule_files_recursive(args.paths, max_depth=3)
@@ -1874,20 +1975,20 @@ if __name__ == '__main__':
     all_filepaths = [fp for fp in all_filepaths if os.path.basename(fp) not in output_files_to_exclude]
 
     if not all_filepaths:
-        print("Error: No rule files found to process. Exiting.")
+        print(f"{Colors.RED}Error: No rule files found to process. Exiting.{Colors.END}")
         sys.exit(1)
         
-    print(f"Found {len(all_filepaths)} rule files to analyze.")
+    print(f"{Colors.GREEN}Found {len(all_filepaths)} rule files to analyze.{Colors.END}")
     
     set_global_flags(args.temp_dir, args.in_memory)
 
     # --- 1. Parallel Rule File Analysis ---
-    print("--- 1. Starting Parallel Rule File Analysis ---")
+    print(f"{Colors.CYAN}--- 1. Starting Parallel Rule File Analysis ---{Colors.END}")
     
     sorted_op_counts, full_rule_counts, all_clean_rules = analyze_rule_files_parallel(all_filepaths, args.max_length)
     
     if not sorted_op_counts:
-        print("No operators found in files. Exiting.")
+        print(f"{Colors.RED}No operators found in files. Exiting.{Colors.END}")
         sys.exit(1)
 
     # --- 2. Markov Model Building (CONDITIONAL SKIP APPLIED HERE) ---
@@ -1901,12 +2002,12 @@ if __name__ == '__main__':
     
     if active_mode == 'extraction' and hasattr(args, 'statistical_sort') and args.statistical_sort:
         build_markov_model = True
-        print("--- 2. Building Markov Model for Statistical Sort ---")
+        print(f"{Colors.CYAN}--- 2. Building Markov Model for Statistical Sort ---{Colors.END}")
     elif active_mode == 'markov':
         build_markov_model = True
-        print("--- 2. Building Markov Model for Rule Generation ---")
+        print(f"{Colors.CYAN}--- 2. Building Markov Model for Rule Generation ---{Colors.END}")
     else:
-        print("--- 2. Skipping Markov Model Build (Not needed for current mode) ---")
+        print(f"{Colors.CYAN}--- 2. Skipping Markov Model Build (Not needed for current mode) ---{Colors.END}")
     
     if build_markov_model:
         markov_probabilities, total_transitions = get_markov_model(full_rule_counts)
@@ -1915,19 +2016,19 @@ if __name__ == '__main__':
     
     if active_mode == 'extraction':
         # --- Enhanced GPU Extraction Mode ---
-        print("\n" + "~"*50)
+        print(f"\n{Colors.CYAN}{Colors.BOLD}" + "~"*50)
         print("--- 3. GPU-Accelerated Rule Extraction and Validation ---")
-        print("~"*50)
+        print("~"*50 + f"{Colors.END}")
         
         if args.statistical_sort:
             mode = 'statistical'
             
             # Check if model was actually built
             if markov_probabilities is None:
-                print("Error: Statistical sort (-s) requires the Markov model, but it was skipped. Please report this as a script bug.")
+                print(f"{Colors.RED}Error: Statistical sort (-s) requires the Markov model, but it was skipped. Please report this as a script bug.{Colors.END}")
                 sys.exit(1)
                 
-            print("\n--- Sort Mode: Statistical Sort (Markov Weight) ---")
+            print(f"\n{Colors.CYAN}--- Sort Mode: Statistical Sort (Markov Weight) ---{Colors.END}")
             sorted_rule_data = get_markov_weighted_rules(full_rule_counts, markov_probabilities, total_transitions)
             
             # GPU validate the statistically sorted rules
@@ -1944,18 +2045,18 @@ if __name__ == '__main__':
                             break
                 
                 top_rules_data = validated_with_weights[:args.top_rules]
-                print(f"GPU validated {len(top_rules_data)} statistically sorted rules")
+                print(f"{Colors.GREEN}GPU validated {len(top_rules_data)} statistically sorted rules{Colors.END}")
             else:
                 top_rules_data = sorted_rule_data[:args.top_rules]
                 
         else:
             mode = 'frequency'
-            print("\n--- Sort Mode: Frequency Sort (Raw Count) with GPU Validation ---")
+            print(f"\n{Colors.CYAN}--- Sort Mode: Frequency Sort (Raw Count) with GPU Validation ---{Colors.END}")
             
             # Use GPU for extraction and validation
             top_rules_data = gpu_extract_and_validate_rules(full_rule_counts, args.top_rules, gpu_enabled)
             
-        print(f"\nExtracted {len(top_rules_data)} top unique rules (max length: {args.max_length} characters).")
+        print(f"\n{Colors.GREEN}Extracted {len(top_rules_data)} top unique rules (max length: {args.max_length} characters).{Colors.END}")
         save_rules_to_file(top_rules_data, output_file_name, mode)
         
         if args.cleanup_bin:
@@ -1963,9 +2064,9 @@ if __name__ == '__main__':
         
     elif active_mode == 'markov':
         # --- STATISTICAL (MARKOV) RULE GENERATION (-gm) ---
-        print("\n" + "!"*50)
+        print(f"\n{Colors.MAGENTA}{Colors.BOLD}" + "!"*50)
         print("--- 3. Starting STATISTICAL Markov Rule Generation (Validated) ---")
-        print("!"*50)
+        print("!"*50 + f"{Colors.END}")
         
         markov_rules_data = generate_rules_from_markov_model(
             markov_probabilities, 
@@ -1985,7 +2086,7 @@ if __name__ == '__main__':
                 if is_valid:
                     valid_markov_rules.append((rule, weight))
             
-            print(f"GPU validated {len(valid_markov_rules)}/{len(markov_rules_data)} Markov rules as syntactically valid")
+            print(f"{Colors.GREEN}GPU validated {len(valid_markov_rules)}/{len(markov_rules_data)} Markov rules as syntactically valid{Colors.END}")
             markov_rules_data = valid_markov_rules[:args.generate_target]
         
         save_rules_to_file(markov_rules_data, output_file_name, 'statistical')
@@ -1995,9 +2096,9 @@ if __name__ == '__main__':
         
     elif active_mode == 'combo':
         # --- COMBINATORIAL RULE GENERATION (-g) ---
-        print("\n" + "#"*50)
+        print(f"\n{Colors.BLUE}{Colors.BOLD}" + "#"*50)
         print("--- 3. Starting COMBINATORIAL Rule Generation (Validated) ---")
-        print("#"*50)
+        print("#"*50 + f"{Colors.END}")
         
         # 3a. Find minimum number of top operators needed
         top_operators_needed = find_min_operators_for_target(
@@ -2007,7 +2108,7 @@ if __name__ == '__main__':
             combo_max_len
         )
         
-        print(f"Using the top {len(top_operators_needed)} operators to approximate {args.combo_target} rules.")
+        print(f"{Colors.CYAN}Using the top {len(top_operators_needed)} operators to approximate {args.combo_target} rules.{Colors.END}")
         
         # 3b. Generate rules with GPU acceleration if available
         if gpu_enabled:
@@ -2029,28 +2130,30 @@ if __name__ == '__main__':
         if args.cleanup_bin:
             run_and_rename_cleanup(output_file_name, args.cleanup_bin, args.cleanup_arg)
 
-    print("\n--- Processing Complete ---")
+    print(f"\n{Colors.GREEN}{Colors.BOLD}--- Processing Complete ---{Colors.END}")
     
-    # Show usage minimizer information
-    print("\n" + "="*60)
+    # Show usage minimizer information with colors
+    print(f"\n{Colors.CYAN}{Colors.BOLD}" + "="*60)
     print("USAGE MINIMIZER RECOMMENDATIONS")
-    print("="*60)
-    print("To optimize your generated rules and reduce file size:")
+    print("="*60 + f"{Colors.END}")
+    print(f"{Colors.YELLOW}To optimize your generated rules and reduce file size:{Colors.END}")
     print()
-    print("* Hashcat's rulefilter:")
-    print("   ./minimizer_cl.py rulesPath")
-    print("   Filters rules based on various criteria")
+    print(f"{Colors.GREEN}* Hashcat's rulefilter:{Colors.END}")
+    print(f"   {Colors.WHITE}./minimizer_cl.py rulesPath{Colors.END}")
+    print(f"   {Colors.CYAN}Filters rules based on various criteria{Colors.END}")
     print()
-    print("These tools can significantly reduce rule file size while")
-    print("maintaining or even improving cracking effectiveness.")
-    print("="*60)
+    print(f"{Colors.GREEN}* Hashcat's cleanup-rules.bin:{Colors.END}")
+    print(f"   {Colors.WHITE}./cleanup-rules.bin rules.rule{Colors.END}") 
+    print(f"   {Colors.CYAN}Removes redundant and ineffective rules{Colors.END}")
+    print()
+    print(f"{Colors.YELLOW}These tools can significantly reduce rule file size while")
+    print(f"maintaining or even improving cracking effectiveness.{Colors.END}")
+    print(f"{Colors.CYAN}" + "="*60 + f"{Colors.END}")
     
     if gpu_enabled:
-        print("GPU Acceleration was used for improved performance")
+        print(f"{Colors.GREEN}GPU Acceleration was used for improved performance{Colors.END}")
     
     # Final RAM usage check
     print_memory_status()
-    
-    sys.exit(0)
     
     sys.exit(0)
