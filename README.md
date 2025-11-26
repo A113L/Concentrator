@@ -151,4 +151,4 @@ https://hcrt.pages.dev/concentrator.static_workflow
 
 - https://github.com/mkb2091/PyRuleEngine/blob/master/PyRuleEngine.py
 - https://github.com/hashcat/hashcat-utils/blob/master/src/cleanup-rules.c
-- 0xVavaldi for inspiration - https://github.com/0xVavaldi
+- https://github.com/0xVavaldi
