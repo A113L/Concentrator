@@ -145,6 +145,8 @@ Distributed under the MIT License. See LICENSE for more information.
 
 https://hcrt.pages.dev/concentrator.static_workflow
 
+[![concentrator1.png](https://i.postimg.cc/dtmTPxmJ/concentrator1.png)](https://postimg.cc/nCrLqTPW)
+
 **Credits**
 
 - https://github.com/mkb2091/PyRuleEngine/blob/master/PyRuleEngine.py
