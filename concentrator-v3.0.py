@@ -2471,7 +2471,7 @@ def concentrator_main_processing(args):
     # Show usage minimizer information
     print_header("CONCENTRATOR USAGE STATEMENT")
     print(f"{Colors.YELLOW}These tool can significantly reduce rule file size while")
-    print(f"maintaining or even improving cracking effectiveness.)
+    print(f"maintaining or even improving cracking effectiveness.")
     print(f"For even better results, it is recommended to debug rules obtained by using Concentrator.)
     {Colors.END}")
     
