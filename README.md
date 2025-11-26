@@ -43,7 +43,7 @@ pip install pyopencl
 Clone the repository and run the script directly:
 
 ```
-git clone https://github.com/A113L/concentrator
+git clone https://github.com/A113L/concentrator.git
 cd concentrator-v3
 python3 concentrator-v3.py --help
 ```
