@@ -12,7 +12,7 @@ Concentrator v3.0 is an advanced, high-performance tool written in Python 3 desi
 
 - Memory Safety: Features proactive memory usage monitoring (psutil) to warn users before performing memory-intensive operations, preventing system instability.
 
-- Advanced Filtering: Supports complex cleanup and deduplication strategies post-generation, including Levenshtein distance filtering (though not fully implemented in the provided snippet, it is implied by the core focus on comprehensive filtering).
+- Advanced Filtering: Supports complex cleanup and deduplication strategies post-generation, including Levenshtein distance filtering.
 
 - Interactive and CLI Modes: Supports full command-line arguments as well as a user-friendly, colorized interactive setup mode.
 
