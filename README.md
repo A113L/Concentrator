@@ -43,65 +43,72 @@ Clone the repository and run the script directly:
 ```
 git clone [https://github.com/your-org/concentrator-v3.git](https://github.com/your-org/concentrator-v3.git)
 cd concentrator-v3
-python3 concentrator_v3.py --help
+python3 concentrator-v3.py --help
 ```
 
 ⚙️ **Usage**
 
-The tool operates via command-line arguments or an interactive mode (-I).
-
-Modes of Operation
-
-The core functionality is driven by the --mode flag:
-
-
-
-*Extraction*
-
-```--mode extract```
-
-Extracts the top N most frequent/statistical rules from existing rule files.
-
-*Combinatorial*
-
-```--mode combo```
-
-Generates new rules by combining selected individual operators up to a max length.
-
-Markov
-
-```--mode markov```
-
-Generates rules based on Markov chain statistics derived from input rules, focusing on high-probability sequences.
-
-**Command-Line Examples**
-
-1. Interactive Setup
-
-Run the script without arguments or with the -I flag to enter the guided setup:
-
-```python3 concentrator_v3.py -I```
-# Follow the on-screen prompts for paths, mode, and settings.
-
-
-2. Extraction Mode (Top 5000 rules)
-
-```python3 concentrator_v3.py \
-    --mode extract \
-    --paths rules/rockyou.rules rules/top10.txt \
-    --top 5000 \
-    --output final_top_rules.txt
 ```
+python concentrator-v3.py -h
 
-3. Combinatorial Generation (Length 1-3, GPU disabled)
+================================================================================
+          CONCENTRATOR v3.0 - Unified Hashcat Rule Processor
+================================================================================
+Combined Features:
+  • OpenCL GPU Acceleration for validation and generation
+  • Three Processing Modes: Extraction, Combinatorial, Markov
+  • Hashcat Rule Engine Simulation & Functional Minimization
+  • Rule Validation and Cleanup (CPU/GPU compatible)
+  • Levenshtein Distance Filtering
+  • Smart Processing Selection & Memory Safety
+  • Interactive & CLI Modes with Colorized Output
+================================================================================
 
-```python3 concentrator_v3.py \
-    --mode combo \
-    --paths seed_operators.txt \
-    --min-len 1 --max-len 3 \
-    --target 1000000 \
-    --no-gpu \
-    --output combo_rules.txt
+Memory Status: RAM 42.4% (6.49 GB/15.42 GB) | SWAP: 6.4% (1.39 GB/21.91 GB)
+USAGE:
+  python concentrator.py [OPTIONS] FILE_OR_DIRECTORY [FILE_OR_DIRECTORY...]
+
+MODES (choose one):
+  -e, --extract-rules     Extract top existing rules from input files
+  -g, --generate-combo    Generate combinatorial rules from top operators
+  -gm, --generate-markov-rules Generate statistically probable Markov rules
+  -p, --process-rules     Interactive rule processing and minimization
+
+EXTRACTION MODE (-e):
+  -t, --top-rules INT     Number of top rules to extract (default: 10000)
+  -s, --statistical-sort  Sort by statistical weight instead of frequency
+
+COMBINATORIAL MODE (-g):
+  -n, --combo-target INT  Target number of rules (default: 100000)
+  -l, --combo-length MIN MAX Rule length range (default: 1 3)
+
+MARKOV MODE (-gm):
+  -gt, --generate-target INT Target rules (default: 10000)
+  -ml, --markov-length MIN MAX Rule length range (default: 1 3)
+
+PROCESSING MODE (-p):
+  -d, --use-disk         Use disk for large datasets to save RAM
+  -ld, --levenshtein-max-dist INT Max Levenshtein distance (default: 2)
+
+GLOBAL OPTIONS:
+  -ob, --output-base-name NAME Base name for output file
+  -m, --max-length INT    Maximum rule length to process (default: 31)
+  --temp-dir DIR        Temporary directory for file mode
+  --in-memory           Process entirely in RAM
+  --no-gpu             Disable GPU acceleration
+
+INTERACTIVE MODE:
+  python concentrator.py   (run without arguments for interactive mode)
+
+EXAMPLES:
+  # Extract top 5000 rules with GPU acceleration
+  python concentrator.py -e -t 5000 --no-gpu rules/*.rule
+
+  # Generate 50k combinatorial rules
+  python concentrator.py -g -n 50000 -l 2 4 hashcat/rules/
+
+  # Process rules interactively with functional minimization
+  python concentrator.py -p -d rules/
 ```
 
 🧠 **Architecture Overview**
