@@ -2469,9 +2469,11 @@ def concentrator_main_processing(args):
     print_success("Processing Complete")
     
     # Show usage minimizer information
-    print_header("USAGE of CONCENTRATOR")
+    print_header("CONCENTRATOR USAGE STATEMENT")
     print(f"{Colors.YELLOW}These tool can significantly reduce rule file size while")
-    print(f"maintaining or even improving cracking effectiveness.{Colors.END}")
+    print(f"maintaining or even improving cracking effectiveness.)
+    print(f"For even better results, it is recommended to debug rules obtained by using Concentrator.)
+    {Colors.END}")
     
     if gpu_enabled:
         print_success("GPU Acceleration was used for improved performance")
