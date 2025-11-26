@@ -149,6 +149,7 @@ https://hcrt.pages.dev/concentrator.static_workflow
 
 **Credits**
 
+- Penguinkeeper for testing rules
 - https://github.com/0xVavaldi/ruleprocessorY
 - https://github.com/synacktiv/rulesfinder
 - https://github.com/mkb2091/PyRuleEngine/blob/master/PyRuleEngine.py
