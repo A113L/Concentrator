@@ -139,6 +139,10 @@ The OpenCL portion requires pyopencl and is currently implemented for the final-
 
 Distributed under the MIT License. See LICENSE for more information.
 
+**Website**
+
+https://hcrt.pages.dev/concentrator.static_workflow
+
 **Credits**
 
 - https://github.com/mkb2091/PyRuleEngine/blob/master/PyRuleEngine.py
