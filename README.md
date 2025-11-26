@@ -149,7 +149,7 @@ https://hcrt.pages.dev/concentrator.static_workflow
 
 **Credits**
 
-- https://github.com/0xVavaldi
+- https://github.com/0xVavaldi/ruleprocessorY
 - https://github.com/synacktiv/rulesfinder
 - https://github.com/mkb2091/PyRuleEngine/blob/master/PyRuleEngine.py
 - https://github.com/hashcat/hashcat-utils/blob/master/src/cleanup-rules.c
